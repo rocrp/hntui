@@ -1,12 +1,24 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HnItemKind {
+    Story,
+    Comment,
+    Job,
+    Poll,
+    Pollopt,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HnItem {
     pub id: u64,
 
     #[serde(rename = "type")]
-    pub kind: Option<String>,
+    pub kind: Option<HnItemKind>,
 
     pub by: Option<String>,
     pub time: Option<i64>,
@@ -36,10 +48,10 @@ impl TryFrom<HnItem> for Story {
     type Error = anyhow::Error;
 
     fn try_from(item: HnItem) -> Result<Self> {
-        let kind = item.kind.as_deref().unwrap_or("");
-        if kind != "story" {
+        let kind = item.kind.unwrap_or(HnItemKind::Unknown);
+        if !matches!(kind, HnItemKind::Story | HnItemKind::Job | HnItemKind::Poll) {
             return Err(anyhow!(
-                "expected HN item type=story, got type={kind:?} id={}",
+                "expected HN item type in [story, job, poll], got type={kind:?} id={}",
                 item.id
             ));
         }
@@ -48,17 +60,17 @@ impl TryFrom<HnItem> for Story {
             id: item.id,
             title: item
                 .title
-                .ok_or_else(|| anyhow!("story missing title id={}", item.id))?,
+                .ok_or_else(|| anyhow!("item missing title id={}", item.id))?,
             url: item.url,
             score: item
                 .score
-                .ok_or_else(|| anyhow!("story missing score id={}", item.id))?,
+                .ok_or_else(|| anyhow!("item missing score id={}", item.id))?,
             by: item
                 .by
-                .ok_or_else(|| anyhow!("story missing by id={}", item.id))?,
+                .ok_or_else(|| anyhow!("item missing by id={}", item.id))?,
             time: item
                 .time
-                .ok_or_else(|| anyhow!("story missing time id={}", item.id))?,
+                .ok_or_else(|| anyhow!("item missing time id={}", item.id))?,
             comment_count: item.descendants.unwrap_or(0),
             kids: item.kids.unwrap_or_default(),
         })
