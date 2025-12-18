@@ -1,5 +1,6 @@
 use crate::app::App;
-use crate::ui::{format_age, now_unix, rainbow_depth_color};
+use crate::ui::{format_age, now_unix};
+use crate::ui::theme;
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -46,7 +47,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|comment| {
                 let indent = "│ ".repeat(comment.depth);
                 let indent_width = indent.chars().count();
-                let indent_style = Style::default().fg(rainbow_depth_color(comment.depth));
+                let indent_style = Style::default().fg(theme::rainbow_depth(comment.depth));
                 let marker_style = indent_style.add_modifier(Modifier::BOLD);
 
                 let thread_marker = if comment.kids.is_empty() {
@@ -70,13 +71,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let mut header_spans = vec![
                     Span::styled(indent.clone(), indent_style),
                     Span::styled(format!("{thread_marker} "), marker_style),
-                    Span::styled(by, Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" ({age})"), Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        by,
+                        Style::default()
+                            .fg(theme::SUBTEXT0)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                    Span::styled(format!(" ({age})"), Style::default().fg(theme::OVERLAY0)),
                 ];
                 if comment.dead && !comment.deleted {
                     header_spans.push(Span::styled(
                         " [dead]",
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(theme::OVERLAY0),
                     ));
                 }
                 let header = Line::from(header_spans);
@@ -110,7 +116,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let list = List::new(items)
         .highlight_symbol("▶ ")
         .repeat_highlight_symbol(false)
-        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .bg(theme::SURFACE0)
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);

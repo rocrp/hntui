@@ -1,5 +1,6 @@
 use crate::app::App;
-use crate::ui::{domain_from_url, format_age, now_unix, rainbow_color};
+use crate::ui::{domain_from_url, format_age, now_unix};
+use crate::ui::theme;
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -94,33 +95,41 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 );
                 let importance = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
 
-                let mut title_style = Style::default().fg(rainbow_color(importance));
+                let accent = theme::rainbow(importance);
+
+                let mut title_style = Style::default().fg(theme::TEXT);
                 if importance >= 0.9 {
                     title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                 } else if importance >= 0.75 {
                     title_style = title_style.add_modifier(Modifier::BOLD);
                 }
 
-                let mut score_style = Style::default().fg(rainbow_color(score_level));
+                let mut score_style = Style::default().fg(theme::rainbow(score_level));
                 if score_level >= 0.85 {
                     score_style = score_style.add_modifier(Modifier::BOLD);
                 }
 
-                let mut comment_style = Style::default().fg(rainbow_color(comment_level));
+                let mut comment_style = Style::default().fg(theme::rainbow(comment_level));
                 if comment_level >= 0.85 {
                     comment_style = comment_style.add_modifier(Modifier::BOLD);
                 }
 
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:>2}. ", idx + 1)),
+                    Span::styled("▌ ", Style::default().fg(accent)),
+                    Span::styled(
+                        format!("{:>2}. ", idx + 1),
+                        Style::default().fg(theme::SUBTEXT1),
+                    ),
                     Span::styled(title, title_style),
                     Span::styled(
                         format!(" ({domain})"),
-                        Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+                        Style::default()
+                            .fg(theme::SUBTEXT0)
+                            .add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("  "),
                     Span::styled(format!("{} pts", story.score), score_style),
-                    Span::styled(" · ", Style::default().fg(Color::Gray)),
+                    Span::styled(" · ", Style::default().fg(theme::OVERLAY0)),
                     Span::styled(format!("{} com", story.comment_count), comment_style),
                 ]))
             })
@@ -129,7 +138,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let list = List::new(items)
         .highlight_symbol("▶ ")
-        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .bg(theme::SURFACE0)
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);
@@ -153,16 +167,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         );
 
         let score_style = Style::default()
-            .fg(rainbow_color(score_level))
+            .fg(theme::rainbow(score_level))
             .add_modifier(Modifier::BOLD);
         let comment_style = Style::default()
-            .fg(rainbow_color(comment_level))
+            .fg(theme::rainbow(comment_level))
             .add_modifier(Modifier::BOLD);
 
         let mut spans = vec![
             Span::styled(format!("{} pts", story.score), score_style),
             Span::raw(format!(" by {} ", story.by)),
-            Span::styled(format!("{age}"), Style::default().fg(Color::Gray)),
+            Span::styled(format!("{age}"), Style::default().fg(theme::SUBTEXT0)),
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];
@@ -171,7 +185,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             spans.push(Span::styled(
                 "loading more…",
                 Style::default()
-                    .fg(Color::Gray)
+                    .fg(theme::SUBTEXT0)
                     .add_modifier(Modifier::ITALIC),
             ));
         }
