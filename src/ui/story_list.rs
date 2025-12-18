@@ -1,8 +1,8 @@
 use crate::app::App;
-use crate::ui::{domain_from_url, format_age, now_unix};
+use crate::ui::{domain_from_url, format_age, now_unix, rainbow_color};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
@@ -28,6 +28,44 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     app.story_page_size = (list_area.height as usize).max(1);
 
+    fn normalize_i64(value: i64, min: i64, max: i64) -> f64 {
+        if max <= min {
+            return 0.0;
+        }
+        let numer = (value.saturating_sub(min)) as f64;
+        let denom = (max - min) as f64;
+        (numer / denom).clamp(0.0, 1.0)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct StoryStats {
+        min_score: i64,
+        max_score: i64,
+        min_comments: i64,
+        max_comments: i64,
+    }
+
+    let stats = if app.stories.is_empty() {
+        None
+    } else {
+        let mut min_score = i64::MAX;
+        let mut max_score = i64::MIN;
+        let mut min_comments = i64::MAX;
+        let mut max_comments = i64::MIN;
+        for story in &app.stories {
+            min_score = min_score.min(story.score);
+            max_score = max_score.max(story.score);
+            min_comments = min_comments.min(story.comment_count);
+            max_comments = max_comments.max(story.comment_count);
+        }
+        Some(StoryStats {
+            min_score,
+            max_score,
+            min_comments,
+            max_comments,
+        })
+    };
+
     let items = if app.story_loading && app.stories.is_empty() {
         vec![ListItem::new(Line::from("Loading…"))]
     } else if app.stories.is_empty() {
@@ -35,6 +73,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             "No stories loaded. Press r to refresh.",
         ))]
     } else {
+        let stats = stats.expect("stats present when stories present");
+
         app.stories
             .iter()
             .enumerate()
@@ -45,12 +85,43 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     .and_then(domain_from_url)
                     .unwrap_or_else(|| "self".to_string());
                 let title = decode_html_entities(&story.title);
-                let meta = format!("  {} pts · {} com", story.score, story.comment_count);
+
+                let score_level = normalize_i64(story.score, stats.min_score, stats.max_score);
+                let comment_level = normalize_i64(
+                    story.comment_count,
+                    stats.min_comments,
+                    stats.max_comments,
+                );
+                let importance = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
+
+                let mut title_style = Style::default().fg(rainbow_color(importance));
+                if importance >= 0.9 {
+                    title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                } else if importance >= 0.75 {
+                    title_style = title_style.add_modifier(Modifier::BOLD);
+                }
+
+                let mut score_style = Style::default().fg(rainbow_color(score_level));
+                if score_level >= 0.85 {
+                    score_style = score_style.add_modifier(Modifier::BOLD);
+                }
+
+                let mut comment_style = Style::default().fg(rainbow_color(comment_level));
+                if comment_level >= 0.85 {
+                    comment_style = comment_style.add_modifier(Modifier::BOLD);
+                }
+
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:>2}. ", idx + 1)),
-                    Span::raw(title),
-                    Span::styled(format!(" ({domain})"), Style::default().fg(Color::DarkGray)),
-                    Span::styled(meta, Style::default().fg(Color::DarkGray)),
+                    Span::styled(title, title_style),
+                    Span::styled(
+                        format!(" ({domain})"),
+                        Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(format!("{} pts", story.score), score_style),
+                    Span::styled(" · ", Style::default().fg(Color::Gray)),
+                    Span::styled(format!("{} com", story.comment_count), comment_style),
                 ]))
             })
             .collect::<Vec<_>>()
@@ -58,7 +129,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let list = List::new(items)
         .highlight_symbol("▶ ")
-        .highlight_style(Style::default().fg(Color::Yellow));
+        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)).add_modifier(Modifier::BOLD));
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);
@@ -73,14 +144,38 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         )])
     } else if let Some(story) = app.selected_story() {
         let age = format_age(story.time, now);
-        let mut s = format!(
-            "{} pts by {} {age} | {} comments",
-            story.score, story.by, story.comment_count
+        let stats = stats.expect("stats present when selected story present");
+        let score_level = normalize_i64(story.score, stats.min_score, stats.max_score);
+        let comment_level = normalize_i64(
+            story.comment_count,
+            stats.min_comments,
+            stats.max_comments,
         );
+
+        let score_style = Style::default()
+            .fg(rainbow_color(score_level))
+            .add_modifier(Modifier::BOLD);
+        let comment_style = Style::default()
+            .fg(rainbow_color(comment_level))
+            .add_modifier(Modifier::BOLD);
+
+        let mut spans = vec![
+            Span::styled(format!("{} pts", story.score), score_style),
+            Span::raw(format!(" by {} ", story.by)),
+            Span::styled(format!("{age}"), Style::default().fg(Color::Gray)),
+            Span::raw(" | "),
+            Span::styled(format!("{} comments", story.comment_count), comment_style),
+        ];
         if app.prefetch_in_flight {
-            s.push_str(" | loading more…");
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                "loading more…",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            ));
         }
-        Line::from(s)
+        Line::from(spans)
     } else if app.story_loading {
         Line::from("Loading…")
     } else {

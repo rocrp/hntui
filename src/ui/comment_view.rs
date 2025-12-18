@@ -1,8 +1,8 @@
 use crate::app::App;
-use crate::ui::{format_age, now_unix};
+use crate::ui::{format_age, now_unix, rainbow_depth_color};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
@@ -44,7 +44,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         app.comment_list
             .iter()
             .map(|comment| {
-                let indent = "  ".repeat(comment.depth);
+                let indent = "│ ".repeat(comment.depth);
+                let indent_width = indent.chars().count();
+                let indent_style = Style::default().fg(rainbow_depth_color(comment.depth));
+                let marker_style = indent_style.add_modifier(Modifier::BOLD);
+
                 let thread_marker = if comment.kids.is_empty() {
                     ' '
                 } else if comment.collapsed {
@@ -64,21 +68,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     .unwrap_or_else(|| "?".to_string());
 
                 let mut header_spans = vec![
-                    Span::raw(format!("{indent}{thread_marker} ")),
-                    Span::raw(by),
-                    Span::styled(format!(" ({age})"), Style::default().fg(Color::DarkGray)),
+                    Span::styled(indent.clone(), indent_style),
+                    Span::styled(format!("{thread_marker} "), marker_style),
+                    Span::styled(by, Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" ({age})"), Style::default().fg(Color::Gray)),
                 ];
                 if comment.dead && !comment.deleted {
                     header_spans.push(Span::styled(
                         " [dead]",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(Color::Gray),
                     ));
                 }
                 let header = Line::from(header_spans);
 
                 let plain = hn_html_to_plain(&comment.text);
                 let wrap_width = content_width
-                    .saturating_sub(indent.len())
+                    .saturating_sub(indent_width)
                     .saturating_sub(2)
                     .max(1);
                 let mut body_lines = wrap_plain(&plain, wrap_width);
@@ -90,7 +95,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let mut lines = Vec::with_capacity(comment_item_height);
                 lines.push(header);
                 for line in body_lines {
-                    lines.push(Line::from(format!("{indent}  {line}")));
+                    lines.push(Line::from(vec![
+                        Span::styled(indent.clone(), indent_style),
+                        Span::raw("  "),
+                        Span::raw(line),
+                    ]));
                 }
 
                 ListItem::new(Text::from(lines))
@@ -101,7 +110,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let list = List::new(items)
         .highlight_symbol("▶ ")
         .repeat_highlight_symbol(false)
-        .highlight_style(Style::default().fg(Color::Yellow));
+        .highlight_style(Style::default().bg(Color::Rgb(40, 40, 40)).add_modifier(Modifier::BOLD));
     frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);
