@@ -8,6 +8,7 @@ pub enum Action {
     PageUp,
     GoTop,
     GoBottom,
+    ToggleHelp,
     OpenComments,
     OpenInBrowser,
     BackOrQuit,
@@ -37,6 +38,7 @@ impl KeyState {
             _ => {
                 self.pending_g = false;
                 match (key.code, key.modifiers) {
+                    (KeyCode::Char('?'), _) => Some(Action::ToggleHelp),
                     (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
                         Some(Action::MoveDown)
                     }

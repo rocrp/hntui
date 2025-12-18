@@ -207,7 +207,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  Enter/Space/l/→:comments  o:open  r:refresh  q:quit    {}/{} loaded",
+        "j/k:nav  Enter/Space/l/→:comments  o:source  r:refresh  ?:help  q:quit    {}/{} loaded",
         app.stories.len(),
         app.story_ids.len()
     ));

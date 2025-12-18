@@ -23,8 +23,9 @@ Stories:
 - `gg` / `G`: top / bottom
 - `Ctrl+d` / `Ctrl+u`: page down / up
 - `Enter` / `Space` / `l` / `→`: open comments
-- `o`: open story in browser
+- `o`: open source link in browser
 - `r`: refresh
+- `?`: help
 - `q` / `Esc`: quit
 
 Comments:
@@ -34,6 +35,7 @@ Comments:
 - `h` / `←`: collapse selected thread
 - `l` / `→`: expand selected thread (lazy-load children)
 - `c`: toggle collapse/expand
-- `o`: open story in browser
+- `o`: open source link in browser
 - `r`: refresh
+- `?`: help
 - `q` / `Esc`: back

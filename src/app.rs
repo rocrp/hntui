@@ -71,6 +71,7 @@ struct PrefetchedComments {
 
 pub struct App {
     pub view: View,
+    pub help_visible: bool,
     pub stories: Vec<Story>,
     pub story_ids: Vec<u64>,
     pub story_list_state: ListState,
@@ -124,6 +125,7 @@ impl App {
 
         Self {
             view: View::Stories,
+            help_visible: false,
             stories: vec![],
             story_ids: vec![],
             story_list_state,
@@ -488,6 +490,17 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        if action == Action::ToggleHelp {
+            self.help_visible = !self.help_visible;
+            return;
+        }
+        if self.help_visible {
+            if action == Action::BackOrQuit {
+                self.help_visible = false;
+            }
+            return;
+        }
+
         match (self.view, action) {
             (View::Stories, Action::BackOrQuit) => self.should_quit = true,
             (View::Comments, Action::BackOrQuit) => {

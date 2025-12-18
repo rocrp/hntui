@@ -1,4 +1,5 @@
 pub mod comment_view;
+pub mod help;
 pub mod story_list;
 pub mod theme;
 
@@ -10,6 +11,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     match app.view {
         View::Stories => story_list::render(frame, app),
         View::Comments => comment_view::render(frame, app),
+    }
+    if app.help_visible {
+        help::render(frame, app);
     }
 }
 
