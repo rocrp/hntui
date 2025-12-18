@@ -139,7 +139,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled(
                         format!(" ({domain})"),
                         Style::default()
-                            .fg(theme::SUBTEXT0)
+                            .fg(theme::OVERLAY0)
                             .add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("  "),
