@@ -28,7 +28,7 @@ pub(crate) fn rainbow(level: f64) -> Color {
         return RAINBOW[max_idx];
     }
     let t = pos - (idx as f64);
-    lerp_rgb(RAINBOW[idx], RAINBOW[idx + 1], t)
+    blend(RAINBOW[idx], RAINBOW[idx + 1], t)
 }
 
 pub(crate) fn rainbow_depth(depth: usize) -> Color {
@@ -36,7 +36,7 @@ pub(crate) fn rainbow_depth(depth: usize) -> Color {
     RAINBOW[idx]
 }
 
-fn lerp_rgb(a: Color, b: Color, t: f64) -> Color {
+pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
     let (ar, ag, ab) = rgb_components(a);
     let (br, bg, bb) = rgb_components(b);
     let t = t.clamp(0.0, 1.0);

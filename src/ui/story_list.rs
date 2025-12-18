@@ -97,7 +97,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
                 let accent = theme::rainbow(importance);
 
-                let mut title_style = Style::default().fg(theme::TEXT);
+                let title_color = theme::blend(theme::OVERLAY0, theme::TEXT, importance);
+                let mut title_style = Style::default().fg(title_color);
                 if importance >= 0.9 {
                     title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                 } else if importance >= 0.75 {
@@ -128,9 +129,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                             .add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("  "),
-                    Span::styled(format!("{} pts", story.score), score_style),
-                    Span::styled(" · ", Style::default().fg(theme::OVERLAY0)),
-                    Span::styled(format!("{} com", story.comment_count), comment_style),
+                    Span::styled(format!("{}", story.score), score_style),
+                    Span::styled("·", Style::default().fg(theme::OVERLAY0)),
+                    Span::styled(format!("{}", story.comment_count), comment_style),
                 ]))
             })
             .collect::<Vec<_>>()
