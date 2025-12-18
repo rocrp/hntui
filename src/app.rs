@@ -1188,5 +1188,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
     }
 
+    drop(tui);
+    if let Some(store) = &state_store {
+        if !app.story_ids.is_empty() && !app.stories.is_empty() {
+            store
+                .save_story_list_state(app.story_ids.clone(), app.stories.clone())
+                .await?;
+        }
+    }
+
     Ok(())
 }
