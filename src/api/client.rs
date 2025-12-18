@@ -1,31 +1,51 @@
+use crate::api::file_cache::FileCache;
 use crate::api::types::{Comment, CommentNode, HnItem, Story};
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use lru::LruCache;
 use reqwest::Client;
+use std::path::PathBuf;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::time::Duration;
+
+#[derive(Debug, Clone)]
+pub struct DiskCacheConfig {
+    pub dir: PathBuf,
+    pub ttl: Duration,
+}
 
 #[derive(Clone)]
 pub struct HnClient {
     base_url: String,
     http: Client,
     cache: Arc<Mutex<LruCache<u64, HnItem>>>,
+    file_cache: Option<Arc<FileCache>>,
     concurrency: usize,
 }
 
 impl HnClient {
-    pub fn new(base_url: String, cache_size: usize, concurrency: usize) -> Result<Self> {
+    pub fn new(
+        base_url: String,
+        cache_size: usize,
+        concurrency: usize,
+        disk_cache: Option<DiskCacheConfig>,
+    ) -> Result<Self> {
         let cache_size = NonZeroUsize::new(cache_size).context("cache_size must be > 0")?;
         let concurrency = NonZeroUsize::new(concurrency)
             .context("concurrency must be > 0")?
             .get();
 
+        let file_cache = disk_cache
+            .map(|cfg| Ok::<_, anyhow::Error>(Arc::new(FileCache::new(cfg.dir, cfg.ttl)?)))
+            .transpose()?;
+
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             http: Client::new(),
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+            file_cache,
             concurrency,
         })
     }
@@ -59,6 +79,14 @@ impl HnClient {
             }
         }
 
+        if let Some(file_cache) = &self.file_cache {
+            if let Some(item) = file_cache.get_item(id).await? {
+                let mut cache = self.cache.lock().await;
+                cache.put(id, item.clone());
+                return Ok(item);
+            }
+        }
+
         let url = format!("{}/item/{}.json", self.base_url, id);
         let item = self
             .http
@@ -75,6 +103,10 @@ impl HnClient {
 
         let mut cache = self.cache.lock().await;
         cache.put(id, item.clone());
+
+        if let Some(file_cache) = &self.file_cache {
+            file_cache.put_item(id, item.clone()).await?;
+        }
 
         Ok(item)
     }

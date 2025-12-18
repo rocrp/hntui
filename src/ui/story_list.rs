@@ -11,12 +11,17 @@ use ratatui::Frame;
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
+    let spinner = app.spinner_frame();
     let title = if app.story_loading && app.stories.is_empty() {
-        "Hacker News (loading)"
+        format!("Hacker News (loading {spinner})")
+    } else if app.prefetch_in_flight && app.comment_prefetch_in_flight {
+        format!("Hacker News (prefetching + comments {spinner})")
     } else if app.prefetch_in_flight {
-        "Hacker News (prefetching)"
+        format!("Hacker News (prefetching {spinner})")
+    } else if app.comment_prefetch_in_flight {
+        format!("Hacker News (preloading comments {spinner})")
     } else {
-        "Hacker News"
+        "Hacker News".to_string()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
@@ -68,7 +73,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let items = if app.story_loading && app.stories.is_empty() {
-        vec![ListItem::new(Line::from("Loading…"))]
+        vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
     } else if app.stories.is_empty() {
         vec![ListItem::new(Line::from(
             "No stories loaded. Press r to refresh.",

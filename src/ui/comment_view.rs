@@ -11,13 +11,14 @@ use ratatui::Frame;
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
+    let spinner = app.spinner_frame();
     let title = app
         .current_story
         .as_ref()
         .map(|s| s.title.as_str())
         .unwrap_or("Comments");
     let title = if app.comment_loading {
-        format!("{title} (loading)")
+        format!("{title} (loading {spinner})")
     } else {
         title.to_string()
     };
@@ -37,7 +38,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let content_width = list_area.width.saturating_sub(2) as usize;
 
     let items = if app.comment_loading && app.comment_list.is_empty() {
-        vec![ListItem::new(Line::from("Loading…"))]
+        vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
     } else if app.comment_list.is_empty() {
         vec![ListItem::new(Line::from("No comments."))]
     } else {
@@ -147,7 +148,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  c:collapse  o:open  r:refresh  q:back    {} comments",
+        "j/k:nav  h/l:collapse  o:open  r:refresh  q:back    {} comments",
         app.comment_list.len()
     ));
     frame.render_widget(Paragraph::new(vec![meta, help]), footer_inner);

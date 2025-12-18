@@ -8,7 +8,7 @@ Hacker News TUI (top stories + nested comments) using the official Firebase API.
 cargo run --release
 ```
 
-Options: `--count`, `--page-size`, `--cache-size`, `--concurrency`, `--base-url`
+Options: `--count`, `--page-size`, `--cache-size`, `--concurrency`, `--no-file-cache`, `--file-cache-dir`, `--file-cache-ttl-secs`, `--base-url`
 
 ## Keys
 
@@ -25,7 +25,7 @@ Comments:
 - `j/k` or `↓/↑`: move
 - `gg` / `G`: top / bottom
 - `Ctrl+d` / `Ctrl+u`: page down / up
-- `c`: collapse/expand selected thread
+- `h/l` or `←/→` or `c`: collapse/expand selected thread
 - `o`: open story in browser
 - `r`: refresh
 - `q` / `Esc`: back

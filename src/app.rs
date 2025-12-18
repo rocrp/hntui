@@ -1,4 +1,4 @@
-use crate::api::{CommentNode, HnClient, Story};
+use crate::api::{CommentNode, DiskCacheConfig, HnClient, Story};
 use crate::input::{Action, KeyState};
 use crate::tui::Tui;
 use crate::ui;
@@ -8,6 +8,7 @@ use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use ratatui::widgets::ListState;
 use std::cmp;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +30,16 @@ pub enum AppEvent {
         story_id: u64,
         comments: Vec<CommentNode>,
     },
+    CommentsPrefetched {
+        generation: u64,
+        story_id: u64,
+        comments: Vec<CommentNode>,
+    },
     Error {
+        generation: u64,
+        message: String,
+    },
+    PrefetchError {
         generation: u64,
         message: String,
     },
@@ -39,6 +49,12 @@ pub enum AppEvent {
 pub enum StoriesLoadMode {
     Replace,
     Append,
+}
+
+#[derive(Debug)]
+struct PrefetchedComments {
+    story_id: u64,
+    comments: Vec<CommentNode>,
 }
 
 pub struct App {
@@ -64,9 +80,15 @@ pub struct App {
 
     stories_generation: u64,
     comments_generation: u64,
+    comments_prefetch_generation: u64,
     pub prefetch_in_flight: bool,
+    pub comment_prefetch_in_flight: bool,
+    comment_prefetch_story_id: Option<u64>,
+    prefetched_comments: Option<PrefetchedComments>,
+    awaiting_prefetch_story_id: Option<u64>,
     input: KeyState,
     should_quit: bool,
+    spinner_idx: usize,
 }
 
 impl App {
@@ -100,10 +122,34 @@ impl App {
 
             stories_generation: 0,
             comments_generation: 0,
+            comments_prefetch_generation: 0,
             prefetch_in_flight: false,
+            comment_prefetch_in_flight: false,
+            comment_prefetch_story_id: None,
+            prefetched_comments: None,
+            awaiting_prefetch_story_id: None,
             input: KeyState::default(),
             should_quit: false,
+            spinner_idx: 0,
         }
+    }
+
+    pub fn spinner_frame(&self) -> char {
+        const FRAMES: [char; 8] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+        FRAMES[self.spinner_idx % FRAMES.len()]
+    }
+
+    pub fn tick(&mut self) {
+        if self.is_busy() {
+            self.spinner_idx = self.spinner_idx.wrapping_add(1);
+        }
+    }
+
+    fn is_busy(&self) -> bool {
+        self.story_loading
+            || self.prefetch_in_flight
+            || self.comment_loading
+            || self.comment_prefetch_in_flight
     }
 
     pub fn should_quit(&self) -> bool {
@@ -117,6 +163,10 @@ impl App {
         self.last_error = None;
         self.story_loading = true;
         self.prefetch_in_flight = false;
+        self.comment_prefetch_in_flight = false;
+        self.comment_prefetch_story_id = None;
+        self.prefetched_comments = None;
+        self.awaiting_prefetch_story_id = None;
         self.story_ids.clear();
         self.stories.clear();
         self.story_list_state.select(Some(0));
@@ -209,6 +259,59 @@ impl App {
         });
     }
 
+    pub fn maybe_prefetch_comments(&mut self) {
+        if self.view != View::Stories {
+            return;
+        }
+        if self.story_loading || self.comment_prefetch_in_flight {
+            return;
+        }
+        let Some(story) = self.selected_story().cloned() else {
+            return;
+        };
+        if story.kids.is_empty() {
+            return;
+        }
+        if self
+            .prefetched_comments
+            .as_ref()
+            .is_some_and(|p| p.story_id == story.id)
+        {
+            return;
+        }
+        if self.comment_prefetch_story_id.is_some_and(|id| id == story.id) {
+            return;
+        }
+
+        self.comments_prefetch_generation = self.comments_prefetch_generation.wrapping_add(1);
+        let generation = self.comments_prefetch_generation;
+
+        self.comment_prefetch_in_flight = true;
+        self.comment_prefetch_story_id = Some(story.id);
+
+        let story_id = story.id;
+        let client = self.client.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let res = client.fetch_comments(&story).await;
+            match res {
+                Ok(comments) => {
+                    let _ = tx.send(AppEvent::CommentsPrefetched {
+                        generation,
+                        story_id,
+                        comments,
+                    });
+                }
+                Err(err) => {
+                    let _ = tx.send(AppEvent::PrefetchError {
+                        generation,
+                        message: format!("{err:#}"),
+                    });
+                }
+            }
+        });
+    }
+
     pub fn open_comments_for_selected_story(&mut self) {
         let Some(story) = self.selected_story().cloned() else {
             return;
@@ -225,12 +328,39 @@ impl App {
             return;
         }
 
+        if self
+            .prefetched_comments
+            .as_ref()
+            .is_some_and(|p| p.story_id == story.id)
+        {
+            let prefetched = self
+                .prefetched_comments
+                .take()
+                .expect("prefetched comments present");
+            self.apply_comments_for_story(story, prefetched.comments, true);
+            return;
+        }
+
+        if self.comment_prefetch_story_id.is_some_and(|id| id == story.id) {
+            self.awaiting_prefetch_story_id = Some(story.id);
+            self.view = View::Comments;
+            self.last_error = None;
+            self.current_story = Some(story);
+            self.comment_loading = true;
+            self.comment_tree.clear();
+            self.comment_list.clear();
+            self.comment_list_state.select(Some(0));
+            *self.comment_list_state.offset_mut() = 0;
+            return;
+        }
+
         self.load_comments_for_story(story, true);
     }
 
     fn load_comments_for_story(&mut self, story: Story, switch_view: bool) {
         self.comments_generation = self.comments_generation.wrapping_add(1);
         let generation = self.comments_generation;
+        self.awaiting_prefetch_story_id = None;
 
         if switch_view {
             self.view = View::Comments;
@@ -267,10 +397,27 @@ impl App {
         });
     }
 
+    fn apply_comments_for_story(&mut self, story: Story, comments: Vec<CommentNode>, switch_view: bool) {
+        if switch_view {
+            self.view = View::Comments;
+        }
+        self.awaiting_prefetch_story_id = None;
+        self.comment_loading = false;
+        self.last_error = None;
+        self.current_story = Some(story);
+        self.comment_tree = comments;
+        self.rebuild_comment_list(None);
+        self.comment_list_state.select(Some(0));
+        *self.comment_list_state.offset_mut() = 0;
+    }
+
     pub fn handle_action(&mut self, action: Action) {
         match (self.view, action) {
             (View::Stories, Action::BackOrQuit) => self.should_quit = true,
-            (View::Comments, Action::BackOrQuit) => self.view = View::Stories,
+            (View::Comments, Action::BackOrQuit) => {
+                self.view = View::Stories;
+                self.maybe_prefetch_comments();
+            }
             (View::Stories, Action::Refresh) => self.refresh_stories(),
             (View::Comments, Action::Refresh) => self.refresh_comments(),
 
@@ -294,6 +441,7 @@ impl App {
                     self.story_page_size,
                 );
                 self.maybe_prefetch_stories();
+                self.maybe_prefetch_comments();
             }
             (View::Stories, Action::MoveUp) => {
                 move_selection_up(&mut self.story_list_state);
@@ -302,6 +450,7 @@ impl App {
                     self.stories.len(),
                     self.story_page_size,
                 );
+                self.maybe_prefetch_comments();
             }
             (View::Stories, Action::PageDown) => {
                 page_down(
@@ -310,13 +459,16 @@ impl App {
                     self.story_page_size,
                 );
                 self.maybe_prefetch_stories();
+                self.maybe_prefetch_comments();
             }
             (View::Stories, Action::PageUp) => {
                 page_up(&mut self.story_list_state, self.story_page_size);
+                self.maybe_prefetch_comments();
             }
             (View::Stories, Action::GoTop) => {
                 self.story_list_state.select(Some(0));
                 *self.story_list_state.offset_mut() = 0;
+                self.maybe_prefetch_comments();
             }
             (View::Stories, Action::GoBottom) => {
                 if !self.stories.is_empty() {
@@ -327,6 +479,7 @@ impl App {
                         self.story_page_size,
                     );
                     self.maybe_prefetch_stories();
+                    self.maybe_prefetch_comments();
                 }
             }
 
@@ -421,6 +574,7 @@ impl App {
                     self.stories.len(),
                     self.story_page_size,
                 );
+                self.maybe_prefetch_comments();
             }
             AppEvent::CommentsLoaded {
                 generation,
@@ -438,12 +592,35 @@ impl App {
                     return;
                 }
 
-                self.comment_loading = false;
-                self.last_error = None;
-                self.comment_tree = comments;
-                self.rebuild_comment_list(None);
-                self.comment_list_state.select(Some(0));
-                *self.comment_list_state.offset_mut() = 0;
+                let story = self
+                    .current_story
+                    .clone()
+                    .expect("current_story present for CommentsLoaded");
+                self.apply_comments_for_story(story, comments, false);
+            }
+            AppEvent::CommentsPrefetched {
+                generation,
+                story_id,
+                comments,
+            } => {
+                if generation != self.comments_prefetch_generation {
+                    return;
+                }
+
+                self.comment_prefetch_in_flight = false;
+                self.comment_prefetch_story_id = None;
+
+                if self.awaiting_prefetch_story_id.is_some_and(|id| id == story_id) {
+                    let story = self
+                        .current_story
+                        .clone()
+                        .expect("current_story present when awaiting prefetch");
+                    self.apply_comments_for_story(story, comments, false);
+                    return;
+                }
+
+                self.prefetched_comments = Some(PrefetchedComments { story_id, comments });
+                self.maybe_prefetch_comments();
             }
             AppEvent::Error {
                 generation,
@@ -455,6 +632,21 @@ impl App {
                 self.story_loading = false;
                 self.prefetch_in_flight = false;
                 self.comment_loading = false;
+                self.last_error = Some(message);
+            }
+            AppEvent::PrefetchError {
+                generation,
+                message,
+            } => {
+                if generation != self.comments_prefetch_generation {
+                    return;
+                }
+                self.comment_prefetch_in_flight = false;
+                self.comment_prefetch_story_id = None;
+                if self.awaiting_prefetch_story_id.is_some() {
+                    self.awaiting_prefetch_story_id = None;
+                    self.comment_loading = false;
+                }
                 self.last_error = Some(message);
             }
         }
@@ -605,7 +797,29 @@ fn ensure_visible(state: &mut ListState, len: usize, page_size: usize) {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    let client = HnClient::new(cli.base_url.clone(), cli.cache_size, cli.concurrency)?;
+    let disk_cache = if cli.no_file_cache {
+        None
+    } else {
+        let dir = match cli.file_cache_dir.clone() {
+            Some(dir) => dir,
+            None => {
+                let proj = directories::ProjectDirs::from("dev", "hntui", "hntui")
+                    .context("resolve OS cache dir")?;
+                proj.cache_dir().to_path_buf()
+            }
+        };
+        Some(DiskCacheConfig {
+            dir,
+            ttl: Duration::from_secs(cli.file_cache_ttl_secs),
+        })
+    };
+
+    let client = HnClient::new(
+        cli.base_url.clone(),
+        cli.cache_size,
+        cli.concurrency,
+        disk_cache,
+    )?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(cli, client, tx.clone());
@@ -616,6 +830,12 @@ pub async fn run(cli: Cli) -> Result<()> {
 
     loop {
         tui.draw(|f| ui::render(f, &mut app))?;
+
+        let tick_duration = if app.is_busy() {
+            Duration::from_millis(120)
+        } else {
+            Duration::from_secs(3600)
+        };
 
         tokio::select! {
             maybe_event = events.next() => {
@@ -635,6 +855,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                     return Err(anyhow::anyhow!("app event channel closed unexpectedly"));
                 };
                 app.handle_app_event(app_event);
+            }
+            _ = tokio::time::sleep(tick_duration) => {
+                app.tick();
             }
         }
 

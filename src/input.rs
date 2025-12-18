@@ -50,6 +50,12 @@ impl KeyState {
                     (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, _) => {
                         Some(Action::BackOrQuit)
                     }
+                    (KeyCode::Char('h'), KeyModifiers::NONE) | (KeyCode::Left, _) => {
+                        Some(Action::ToggleCollapse)
+                    }
+                    (KeyCode::Char('l'), KeyModifiers::NONE) | (KeyCode::Right, _) => {
+                        Some(Action::ToggleCollapse)
+                    }
                     (KeyCode::Char('c'), KeyModifiers::NONE) => Some(Action::ToggleCollapse),
                     (KeyCode::Char('r'), KeyModifiers::NONE) => Some(Action::Refresh),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::BackOrQuit),
