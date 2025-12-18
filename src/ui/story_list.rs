@@ -45,10 +45,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     .and_then(domain_from_url)
                     .unwrap_or_else(|| "self".to_string());
                 let title = decode_html_entities(&story.title);
+                let meta = format!("  {} pts · {} com", story.score, story.comment_count);
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:>2}. ", idx + 1)),
                     Span::raw(title),
                     Span::styled(format!(" ({domain})"), Style::default().fg(Color::DarkGray)),
+                    Span::styled(meta, Style::default().fg(Color::DarkGray)),
                 ]))
             })
             .collect::<Vec<_>>()
