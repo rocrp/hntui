@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod input;
+mod state;
 mod tui;
 mod ui;
 
@@ -26,7 +27,7 @@ pub struct Cli {
     #[arg(long, default_value_t = 20)]
     pub concurrency: usize,
 
-    /// Disable the on-disk item cache.
+    /// Disable the on-disk cache (items + story list state).
     #[arg(long, default_value_t = false)]
     pub no_file_cache: bool,
 
@@ -35,7 +36,7 @@ pub struct Cli {
     pub file_cache_dir: Option<PathBuf>,
 
     /// Max age for cached items (seconds).
-    #[arg(long, default_value_t = 60)]
+    #[arg(long, default_value_t = 3600)]
     pub file_cache_ttl_secs: u64,
 
     /// Hacker News API base URL.

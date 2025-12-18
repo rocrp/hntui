@@ -4,11 +4,11 @@ use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use lru::LruCache;
 use reqwest::Client;
-use std::path::PathBuf;
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct DiskCacheConfig {
@@ -135,45 +135,39 @@ impl HnClient {
             .collect()
     }
 
-    pub async fn fetch_comments(&self, story: &Story) -> Result<Vec<CommentNode>> {
+    pub async fn fetch_comment_roots(&self, story: &Story) -> Result<Vec<CommentNode>> {
         if story.kids.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_comment_nodes(&story.kids, 0).await
+        self.fetch_comment_nodes_shallow(&story.kids, 0).await
     }
 
-    async fn fetch_comment_nodes(&self, ids: &[u64], depth: usize) -> Result<Vec<CommentNode>> {
+    pub async fn fetch_comment_children(
+        &self,
+        ids: &[u64],
+        depth: usize,
+    ) -> Result<Vec<CommentNode>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        self.fetch_comment_nodes_shallow(ids, depth).await
+    }
+
+    async fn fetch_comment_nodes_shallow(
+        &self,
+        ids: &[u64],
+        depth: usize,
+    ) -> Result<Vec<CommentNode>> {
         let items = self.fetch_items_batch(ids).await?;
 
         let mut nodes = Vec::with_capacity(items.len());
-        let mut child_fetches = Vec::new();
-
-        for (idx, item) in items.into_iter().enumerate() {
-            let kids = item.kids.clone().unwrap_or_default();
+        for item in items {
             let comment = Comment::from_item(item, depth);
             let node = CommentNode {
                 comment,
                 children: vec![],
             };
             nodes.push(node);
-
-            if !kids.is_empty() {
-                child_fetches.push((idx, kids));
-            }
-        }
-
-        let concurrency = self.concurrency;
-        let fetched_children = stream::iter(child_fetches.into_iter())
-            .map(|(idx, kids)| async move {
-                let children = self.fetch_comment_nodes(&kids, depth + 1).await?;
-                Ok::<_, anyhow::Error>((idx, children))
-            })
-            .buffer_unordered(concurrency)
-            .try_collect::<Vec<_>>()
-            .await?;
-
-        for (idx, children) in fetched_children {
-            nodes[idx].children = children;
         }
 
         Ok(nodes)

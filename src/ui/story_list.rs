@@ -1,6 +1,6 @@
 use crate::app::App;
-use crate::ui::{domain_from_url, format_age, now_unix};
 use crate::ui::theme;
+use crate::ui::{domain_from_url, format_age, now_unix};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -14,6 +14,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let spinner = app.spinner_frame();
     let title = if app.story_loading && app.stories.is_empty() {
         format!("Hacker News (loading {spinner})")
+    } else if app.story_loading {
+        format!("Hacker News (refreshing {spinner})")
     } else if app.prefetch_in_flight && app.comment_prefetch_in_flight {
         format!("Hacker News (prefetching + comments {spinner})")
     } else if app.prefetch_in_flight {
@@ -93,16 +95,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let title = decode_html_entities(&story.title);
 
                 let score_level = normalize_i64(story.score, stats.min_score, stats.max_score);
-                let comment_level = normalize_i64(
-                    story.comment_count,
-                    stats.min_comments,
-                    stats.max_comments,
-                );
+                let comment_level =
+                    normalize_i64(story.comment_count, stats.min_comments, stats.max_comments);
                 let importance = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
 
                 let accent = theme::rainbow(importance);
                 let color_t = importance.powf(1.2);
-                let title_color = theme::blend(theme::SUBTEXT1, accent, color_t);
+                let base_t = (0.35 + (importance.powf(0.8) * 0.65)).clamp(0.0, 1.0);
+                let title_base = theme::blend(theme::SUBTEXT1, theme::TEXT, base_t);
+                let title_color = theme::blend(title_base, accent, color_t);
                 let mut title_style = Style::default().fg(title_color);
                 if importance >= 0.9 {
                     title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
@@ -113,7 +114,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let score_accent = theme::rainbow(score_level);
                 let score_t = score_level.powf(1.4);
                 let mut score_style =
-                    Style::default().fg(theme::blend(theme::OVERLAY0, score_accent, score_t));
+                    Style::default().fg(theme::blend(theme::SUBTEXT0, score_accent, score_t));
                 if score_level >= 0.85 {
                     score_style = score_style.add_modifier(Modifier::BOLD);
                 } else if score_level <= 0.25 {
@@ -123,7 +124,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let comment_accent = theme::rainbow(comment_level);
                 let comment_t = comment_level.powf(1.4);
                 let mut comment_style =
-                    Style::default().fg(theme::blend(theme::OVERLAY0, comment_accent, comment_t));
+                    Style::default().fg(theme::blend(theme::SUBTEXT0, comment_accent, comment_t));
                 if comment_level >= 0.85 {
                     comment_style = comment_style.add_modifier(Modifier::BOLD);
                 } else if comment_level <= 0.25 {
@@ -140,7 +141,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         format!(" ({domain})"),
                         Style::default()
                             .fg(theme::OVERLAY0)
-                            .add_modifier(Modifier::ITALIC),
+                            .add_modifier(Modifier::ITALIC | Modifier::DIM),
                     ),
                     Span::raw("  "),
                     Span::styled(format!("{}", story.score), score_style),
@@ -151,13 +152,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .collect::<Vec<_>>()
     };
 
-    let list = List::new(items)
-        .highlight_symbol("")
-        .highlight_style(
-            Style::default()
-                .bg(theme::SURFACE1)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).highlight_symbol("").highlight_style(
+        Style::default()
+            .bg(theme::SURFACE2)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);
@@ -174,11 +173,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let age = format_age(story.time, now);
         let stats = stats.expect("stats present when selected story present");
         let score_level = normalize_i64(story.score, stats.min_score, stats.max_score);
-        let comment_level = normalize_i64(
-            story.comment_count,
-            stats.min_comments,
-            stats.max_comments,
-        );
+        let comment_level =
+            normalize_i64(story.comment_count, stats.min_comments, stats.max_comments);
 
         let score_style = Style::default()
             .fg(theme::rainbow(score_level))

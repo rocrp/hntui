@@ -32,7 +32,7 @@ pub struct HnItem {
     pub deleted: Option<bool>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Story {
     pub id: u64,
     pub title: String,
@@ -86,6 +86,8 @@ pub struct Comment {
     pub kids: Vec<u64>,
     pub depth: usize,
     pub collapsed: bool,
+    pub children_loaded: bool,
+    pub children_loading: bool,
     pub deleted: bool,
     pub dead: bool,
 }
@@ -94,6 +96,7 @@ impl Comment {
     pub fn from_item(item: HnItem, depth: usize) -> Self {
         let deleted = item.deleted.unwrap_or(false);
         let dead = item.dead.unwrap_or(false);
+        let kids = item.kids.unwrap_or_default();
         let text = item
             .text
             .filter(|t| !t.trim().is_empty())
@@ -112,9 +115,11 @@ impl Comment {
             by: item.by,
             time: item.time,
             text,
-            kids: item.kids.unwrap_or_default(),
+            kids: kids.clone(),
             depth,
-            collapsed: false,
+            collapsed: !kids.is_empty(),
+            children_loaded: kids.is_empty(),
+            children_loading: false,
             deleted,
             dead,
         }

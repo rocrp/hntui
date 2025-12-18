@@ -1,6 +1,6 @@
 use crate::app::App;
-use crate::ui::{format_age, now_unix};
 use crate::ui::theme;
+use crate::ui::{format_age, now_unix};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -55,6 +55,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     ' '
                 } else if comment.collapsed {
                     '▸'
+                } else if comment.children_loading {
+                    spinner
                 } else {
                     '▾'
                 };
@@ -119,7 +121,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .repeat_highlight_symbol(false)
         .highlight_style(
             Style::default()
-                .bg(theme::SURFACE1)
+                .bg(theme::SURFACE2)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);

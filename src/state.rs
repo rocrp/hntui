@@ -1,64 +1,60 @@
-use crate::api::types::HnItem;
+use crate::api::Story;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
 
 #[derive(Debug, Clone)]
-pub(crate) struct FileCache {
-    items_dir: PathBuf,
-    ttl: Duration,
+pub(crate) struct StateStore {
+    path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedItem {
-    fetched_at: i64,
-    item: HnItem,
+pub(crate) struct StoryListState {
+    pub saved_at: i64,
+    pub story_ids: Vec<u64>,
+    pub stories: Vec<Story>,
 }
 
-impl FileCache {
-    pub(crate) fn new(dir: PathBuf, ttl: Duration) -> Result<Self> {
-        anyhow::ensure!(ttl.as_secs() > 0, "file cache ttl must be > 0s");
-        let items_dir = dir.join("items");
-        std::fs::create_dir_all(&items_dir)
-            .with_context(|| format!("create cache dir {}", items_dir.display()))?;
-        Ok(Self { items_dir, ttl })
+impl StateStore {
+    pub(crate) fn new(cache_dir: PathBuf) -> Self {
+        Self {
+            path: cache_dir.join("state.json"),
+        }
     }
 
-    pub(crate) async fn get_item(&self, id: u64) -> Result<Option<HnItem>> {
-        let path = self.item_path(id);
-        let bytes = match fs::read(&path).await {
+    pub(crate) async fn load_story_list_state(&self) -> Result<Option<StoryListState>> {
+        let bytes = match fs::read(&self.path).await {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => {
-                return Err(err).with_context(|| format!("read cache {}", path.display()));
-            }
+            Err(err) => return Err(err).with_context(|| format!("read {}", self.path.display())),
         };
 
-        let cached: CachedItem = serde_json::from_slice(&bytes)
-            .with_context(|| format!("decode cache {}", path.display()))?;
-        let now = now_unix()?;
-        let age_secs = now.saturating_sub(cached.fetched_at).max(0);
-        if age_secs as u64 > self.ttl.as_secs() {
-            return Ok(None);
-        }
-        Ok(Some(cached.item))
+        let state: StoryListState = serde_json::from_slice(&bytes)
+            .with_context(|| format!("decode {}", self.path.display()))?;
+        Ok(Some(state))
     }
 
-    pub(crate) async fn put_item(&self, id: u64, item: HnItem) -> Result<()> {
-        let path = self.item_path(id);
-        let cached = CachedItem {
-            fetched_at: now_unix()?,
-            item,
+    pub(crate) async fn save_story_list_state(
+        &self,
+        story_ids: Vec<u64>,
+        stories: Vec<Story>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !story_ids.is_empty(),
+            "refusing to save empty story_ids state"
+        );
+        anyhow::ensure!(!stories.is_empty(), "refusing to save empty stories state");
+
+        let state = StoryListState {
+            saved_at: now_unix()?,
+            story_ids,
+            stories,
         };
-        let bytes = serde_json::to_vec(&cached).context("encode cache")?;
-        atomic_write(&path, &bytes).await?;
+        let bytes = serde_json::to_vec(&state).context("encode story list state")?;
+        atomic_write(&self.path, &bytes).await?;
         Ok(())
-    }
-
-    fn item_path(&self, id: u64) -> PathBuf {
-        self.items_dir.join(format!("{id}.json"))
     }
 }
 
@@ -73,6 +69,13 @@ fn now_unix() -> Result<i64> {
 }
 
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("atomic_write path has no parent dir")?;
+    fs::create_dir_all(parent)
+        .await
+        .with_context(|| format!("create dir {}", parent.display()))?;
+
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system time before unix epoch")?

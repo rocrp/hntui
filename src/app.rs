@@ -1,5 +1,6 @@
 use crate::api::{CommentNode, DiskCacheConfig, HnClient, Story};
 use crate::input::{Action, KeyState};
+use crate::state::StateStore;
 use crate::tui::Tui;
 use crate::ui;
 use crate::Cli;
@@ -8,6 +9,7 @@ use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use ratatui::widgets::ListState;
 use std::cmp;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -34,6 +36,16 @@ pub enum AppEvent {
         generation: u64,
         story_id: u64,
         comments: Vec<CommentNode>,
+    },
+    CommentChildrenLoaded {
+        generation: u64,
+        parent_id: u64,
+        children: Vec<CommentNode>,
+    },
+    CommentChildrenError {
+        generation: u64,
+        parent_id: u64,
+        message: String,
     },
     Error {
         generation: u64,
@@ -77,6 +89,7 @@ pub struct App {
     client: HnClient,
     cli: Cli,
     tx: mpsc::UnboundedSender<AppEvent>,
+    state_store: Option<StateStore>,
 
     stories_generation: u64,
     comments_generation: u64,
@@ -89,10 +102,20 @@ pub struct App {
     input: KeyState,
     should_quit: bool,
     spinner_idx: usize,
+
+    pending_story_selection_id: Option<u64>,
+
+    comment_children_generation: u64,
+    comment_children_in_flight: HashMap<u64, u64>,
 }
 
 impl App {
-    pub fn new(cli: Cli, client: HnClient, tx: mpsc::UnboundedSender<AppEvent>) -> Self {
+    pub fn new(
+        cli: Cli,
+        client: HnClient,
+        tx: mpsc::UnboundedSender<AppEvent>,
+        state_store: Option<StateStore>,
+    ) -> Self {
         let mut story_list_state = ListState::default();
         story_list_state.select(Some(0));
 
@@ -119,6 +142,7 @@ impl App {
             client,
             cli,
             tx,
+            state_store,
 
             stories_generation: 0,
             comments_generation: 0,
@@ -131,6 +155,11 @@ impl App {
             input: KeyState::default(),
             should_quit: false,
             spinner_idx: 0,
+
+            pending_story_selection_id: None,
+
+            comment_children_generation: 0,
+            comment_children_in_flight: HashMap::new(),
         }
     }
 
@@ -150,6 +179,38 @@ impl App {
             || self.prefetch_in_flight
             || self.comment_loading
             || self.comment_prefetch_in_flight
+            || !self.comment_children_in_flight.is_empty()
+    }
+
+    pub fn restore_story_list_state(&mut self, story_ids: Vec<u64>, stories: Vec<Story>) {
+        if story_ids.is_empty() || stories.is_empty() {
+            self.last_error = Some("refusing to restore empty story list state".to_string());
+            return;
+        }
+
+        self.story_ids = story_ids;
+        self.stories = stories;
+        self.story_loading = false;
+        self.prefetch_in_flight = false;
+        self.story_list_state.select(Some(0));
+        *self.story_list_state.offset_mut() = 0;
+    }
+
+    fn save_story_list_state_background(&self) {
+        let Some(store) = self.state_store.clone() else {
+            return;
+        };
+        if self.story_ids.is_empty() || self.stories.is_empty() {
+            return;
+        }
+
+        let story_ids = self.story_ids.clone();
+        let stories = self.stories.clone();
+        tokio::spawn(async move {
+            if let Err(err) = store.save_story_list_state(story_ids, stories).await {
+                eprintln!("hntui: failed to save story list state: {err:#}");
+            }
+        });
     }
 
     pub fn should_quit(&self) -> bool {
@@ -160,17 +221,15 @@ impl App {
         self.stories_generation = self.stories_generation.wrapping_add(1);
         let generation = self.stories_generation;
 
+        self.pending_story_selection_id = self.selected_story().map(|s| s.id);
+
         self.last_error = None;
         self.story_loading = true;
         self.prefetch_in_flight = false;
-        self.comment_prefetch_in_flight = false;
-        self.comment_prefetch_story_id = None;
-        self.prefetched_comments = None;
-        self.awaiting_prefetch_story_id = None;
-        self.story_ids.clear();
-        self.stories.clear();
-        self.story_list_state.select(Some(0));
-        *self.story_list_state.offset_mut() = 0;
+        if self.stories.is_empty() {
+            self.story_list_state.select(Some(0));
+            *self.story_list_state.offset_mut() = 0;
+        }
 
         let client = self.client.clone();
         let tx = self.tx.clone();
@@ -263,7 +322,10 @@ impl App {
         if self.view != View::Stories {
             return;
         }
-        if self.story_loading || self.comment_prefetch_in_flight {
+        if self.comment_prefetch_in_flight {
+            return;
+        }
+        if self.story_loading && self.stories.is_empty() {
             return;
         }
         let Some(story) = self.selected_story().cloned() else {
@@ -279,7 +341,10 @@ impl App {
         {
             return;
         }
-        if self.comment_prefetch_story_id.is_some_and(|id| id == story.id) {
+        if self
+            .comment_prefetch_story_id
+            .is_some_and(|id| id == story.id)
+        {
             return;
         }
 
@@ -293,7 +358,7 @@ impl App {
         let client = self.client.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let res = client.fetch_comments(&story).await;
+            let res = client.fetch_comment_roots(&story).await;
             match res {
                 Ok(comments) => {
                     let _ = tx.send(AppEvent::CommentsPrefetched {
@@ -341,13 +406,17 @@ impl App {
             return;
         }
 
-        if self.comment_prefetch_story_id.is_some_and(|id| id == story.id) {
+        if self
+            .comment_prefetch_story_id
+            .is_some_and(|id| id == story.id)
+        {
             self.awaiting_prefetch_story_id = Some(story.id);
             self.view = View::Comments;
             self.last_error = None;
             self.current_story = Some(story);
             self.comment_loading = true;
             self.comment_tree.clear();
+            self.comment_children_in_flight.clear();
             self.comment_list.clear();
             self.comment_list_state.select(Some(0));
             *self.comment_list_state.offset_mut() = 0;
@@ -370,6 +439,7 @@ impl App {
         self.current_story = Some(story.clone());
         self.comment_loading = true;
         self.comment_tree.clear();
+        self.comment_children_in_flight.clear();
         self.comment_list.clear();
         self.comment_list_state.select(Some(0));
         *self.comment_list_state.offset_mut() = 0;
@@ -378,7 +448,7 @@ impl App {
         let client = self.client.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let res = client.fetch_comments(&story).await;
+            let res = client.fetch_comment_roots(&story).await;
             match res {
                 Ok(comments) => {
                     let _ = tx.send(AppEvent::CommentsLoaded {
@@ -397,12 +467,18 @@ impl App {
         });
     }
 
-    fn apply_comments_for_story(&mut self, story: Story, comments: Vec<CommentNode>, switch_view: bool) {
+    fn apply_comments_for_story(
+        &mut self,
+        story: Story,
+        comments: Vec<CommentNode>,
+        switch_view: bool,
+    ) {
         if switch_view {
             self.view = View::Comments;
         }
         self.awaiting_prefetch_story_id = None;
         self.comment_loading = false;
+        self.comment_children_in_flight.clear();
         self.last_error = None;
         self.current_story = Some(story);
         self.comment_tree = comments;
@@ -564,7 +640,12 @@ impl App {
                 match mode {
                     StoriesLoadMode::Replace => {
                         self.stories = stories;
-                        self.story_list_state.select(Some(0));
+                        let select_idx = self
+                            .pending_story_selection_id
+                            .take()
+                            .and_then(|id| self.stories.iter().position(|s| s.id == id))
+                            .unwrap_or(0);
+                        self.story_list_state.select(Some(select_idx));
                         *self.story_list_state.offset_mut() = 0;
                     }
                     StoriesLoadMode::Append => {
@@ -577,6 +658,7 @@ impl App {
                     self.stories.len(),
                     self.story_page_size,
                 );
+                self.save_story_list_state_background();
                 self.maybe_prefetch_comments();
             }
             AppEvent::CommentsLoaded {
@@ -613,7 +695,10 @@ impl App {
                 self.comment_prefetch_in_flight = false;
                 self.comment_prefetch_story_id = None;
 
-                if self.awaiting_prefetch_story_id.is_some_and(|id| id == story_id) {
+                if self
+                    .awaiting_prefetch_story_id
+                    .is_some_and(|id| id == story_id)
+                {
                     let story = self
                         .current_story
                         .clone()
@@ -624,6 +709,56 @@ impl App {
 
                 self.prefetched_comments = Some(PrefetchedComments { story_id, comments });
                 self.maybe_prefetch_comments();
+            }
+            AppEvent::CommentChildrenLoaded {
+                generation,
+                parent_id,
+                children,
+            } => {
+                if self
+                    .comment_children_in_flight
+                    .get(&parent_id)
+                    .copied()
+                    .is_some_and(|g| g != generation)
+                {
+                    return;
+                }
+                if self.comment_children_in_flight.remove(&parent_id).is_none() {
+                    return;
+                }
+
+                if attach_children_in_tree(&mut self.comment_tree, parent_id, children).is_none() {
+                    self.last_error = Some(format!("comment not found id={parent_id}"));
+                    return;
+                }
+
+                self.rebuild_comment_list(Some(parent_id));
+                ensure_visible(
+                    &mut self.comment_list_state,
+                    self.comment_list.len(),
+                    self.comment_page_size,
+                );
+            }
+            AppEvent::CommentChildrenError {
+                generation,
+                parent_id,
+                message,
+            } => {
+                if self
+                    .comment_children_in_flight
+                    .get(&parent_id)
+                    .copied()
+                    .is_some_and(|g| g != generation)
+                {
+                    return;
+                }
+                if self.comment_children_in_flight.remove(&parent_id).is_none() {
+                    return;
+                }
+                let _ = set_children_loading_in_tree(&mut self.comment_tree, parent_id, false);
+                let _ = set_collapse_in_tree(&mut self.comment_tree, parent_id, true);
+                self.last_error = Some(message);
+                self.rebuild_comment_list(Some(parent_id));
             }
             AppEvent::Error {
                 generation,
@@ -692,6 +827,66 @@ impl App {
         }
     }
 
+    fn start_loading_comment_children(&mut self, parent_id: u64) {
+        if self.comment_children_in_flight.contains_key(&parent_id) {
+            return;
+        }
+
+        let Some(info) = comment_info_in_tree(&self.comment_tree, parent_id) else {
+            self.last_error = Some(format!("comment not found id={parent_id}"));
+            return;
+        };
+        let (parent_depth, kids, children_loaded, children_loading) = info;
+
+        if kids.is_empty() || children_loaded || children_loading {
+            return;
+        }
+
+        self.comment_children_generation = self.comment_children_generation.wrapping_add(1);
+        let generation = self.comment_children_generation;
+        self.comment_children_in_flight
+            .insert(parent_id, generation);
+
+        if set_children_loading_in_tree(&mut self.comment_tree, parent_id, true).is_none() {
+            self.last_error = Some(format!("comment not found id={parent_id}"));
+            return;
+        }
+        if set_collapse_in_tree(&mut self.comment_tree, parent_id, false).is_none() {
+            self.last_error = Some(format!("comment not found id={parent_id}"));
+            return;
+        }
+
+        self.rebuild_comment_list(Some(parent_id));
+        ensure_visible(
+            &mut self.comment_list_state,
+            self.comment_list.len(),
+            self.comment_page_size,
+        );
+
+        let depth = parent_depth.saturating_add(1);
+        let client = self.client.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let res = client.fetch_comment_children(&kids, depth).await;
+            match res {
+                Ok(children) => {
+                    let _ = tx.send(AppEvent::CommentChildrenLoaded {
+                        generation,
+                        parent_id,
+                        children,
+                    });
+                }
+                Err(err) => {
+                    let _ = tx.send(AppEvent::CommentChildrenError {
+                        generation,
+                        parent_id,
+                        message: format!("{err:#}"),
+                    });
+                }
+            }
+        });
+    }
+
     fn collapse_selected_comment(&mut self) {
         let Some(selected) = self.comment_list_state.selected() else {
             return;
@@ -724,13 +919,19 @@ impl App {
         let Some(comment) = self.comment_list.get(selected) else {
             return;
         };
-        if comment.kids.is_empty() || !comment.collapsed {
+        if comment.kids.is_empty() {
             return;
         }
 
         let id = comment.id;
+        let needs_load = !comment.children_loaded && !comment.children_loading;
         if set_collapse_in_tree(&mut self.comment_tree, id, false).is_none() {
             self.last_error = Some(format!("comment not found id={id}"));
+            return;
+        }
+
+        if needs_load {
+            self.start_loading_comment_children(id);
             return;
         }
 
@@ -752,19 +953,11 @@ impl App {
         if comment.kids.is_empty() {
             return;
         }
-
-        let id = comment.id;
-        if toggle_collapse_in_tree(&mut self.comment_tree, id).is_none() {
-            self.last_error = Some(format!("comment not found id={id}"));
-            return;
+        if comment.collapsed {
+            self.expand_selected_comment();
+        } else {
+            self.collapse_selected_comment();
         }
-
-        self.rebuild_comment_list(Some(id));
-        ensure_visible(
-            &mut self.comment_list_state,
-            self.comment_list.len(),
-            self.comment_page_size,
-        );
     }
 }
 
@@ -777,19 +970,6 @@ fn open_story(story: &Story) -> Result<()> {
     Ok(())
 }
 
-fn toggle_collapse_in_tree(tree: &mut [CommentNode], target: u64) -> Option<()> {
-    for node in tree {
-        if node.comment.id == target {
-            node.comment.collapsed = !node.comment.collapsed;
-            return Some(());
-        }
-        if toggle_collapse_in_tree(&mut node.children, target).is_some() {
-            return Some(());
-        }
-    }
-    None
-}
-
 fn set_collapse_in_tree(tree: &mut [CommentNode], target: u64, collapsed: bool) -> Option<()> {
     for node in tree {
         if node.comment.id == target {
@@ -799,6 +979,74 @@ fn set_collapse_in_tree(tree: &mut [CommentNode], target: u64, collapsed: bool) 
         if set_collapse_in_tree(&mut node.children, target, collapsed).is_some() {
             return Some(());
         }
+    }
+    None
+}
+
+fn comment_info_in_tree(
+    tree: &[CommentNode],
+    target: u64,
+) -> Option<(usize, Vec<u64>, bool, bool)> {
+    for node in tree {
+        if node.comment.id == target {
+            return Some((
+                node.comment.depth,
+                node.comment.kids.clone(),
+                node.comment.children_loaded,
+                node.comment.children_loading,
+            ));
+        }
+        if let Some(found) = comment_info_in_tree(&node.children, target) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn set_children_loading_in_tree(
+    tree: &mut [CommentNode],
+    target: u64,
+    loading: bool,
+) -> Option<()> {
+    for node in tree {
+        if node.comment.id == target {
+            node.comment.children_loading = loading;
+            return Some(());
+        }
+        if set_children_loading_in_tree(&mut node.children, target, loading).is_some() {
+            return Some(());
+        }
+    }
+    None
+}
+
+fn attach_children_in_tree(
+    tree: &mut [CommentNode],
+    target: u64,
+    children: Vec<CommentNode>,
+) -> Option<()> {
+    fn inner(
+        tree: &mut [CommentNode],
+        target: u64,
+        children: &mut Option<Vec<CommentNode>>,
+    ) -> bool {
+        for node in tree {
+            if node.comment.id == target {
+                node.children = children.take().expect("children not yet taken");
+                node.comment.children_loaded = true;
+                node.comment.children_loading = false;
+                return true;
+            }
+            if inner(&mut node.children, target, children) {
+                return true;
+            }
+        }
+        false
+    }
+
+    let mut children = Some(children);
+    if inner(tree, target, &mut children) {
+        return Some(());
     }
     None
 }
@@ -863,22 +1111,23 @@ fn ensure_visible(state: &mut ListState, len: usize, page_size: usize) {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    let disk_cache = if cli.no_file_cache {
+    let cache_dir = if cli.no_file_cache {
         None
     } else {
-        let dir = match cli.file_cache_dir.clone() {
+        Some(match cli.file_cache_dir.clone() {
             Some(dir) => dir,
             None => {
                 let proj = directories::ProjectDirs::from("dev", "hntui", "hntui")
                     .context("resolve OS cache dir")?;
                 proj.cache_dir().to_path_buf()
             }
-        };
-        Some(DiskCacheConfig {
-            dir,
-            ttl: Duration::from_secs(cli.file_cache_ttl_secs),
         })
     };
+    let state_store = cache_dir.clone().map(StateStore::new);
+    let disk_cache = cache_dir.clone().map(|dir| DiskCacheConfig {
+        dir,
+        ttl: Duration::from_secs(cli.file_cache_ttl_secs),
+    });
 
     let client = HnClient::new(
         cli.base_url.clone(),
@@ -888,7 +1137,14 @@ pub async fn run(cli: Cli) -> Result<()> {
     )?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
-    let mut app = App::new(cli, client, tx.clone());
+    let mut app = App::new(cli, client, tx.clone(), state_store.clone());
+
+    if let Some(store) = &state_store {
+        if let Some(state) = store.load_story_list_state().await? {
+            app.restore_story_list_state(state.story_ids, state.stories);
+        }
+    }
+    app.maybe_prefetch_comments();
     app.refresh_stories();
 
     let mut tui = Tui::init()?;
