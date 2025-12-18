@@ -16,7 +16,7 @@ Stories:
 - `j/k` or `↓/↑`: move
 - `gg` / `G`: top / bottom
 - `Ctrl+d` / `Ctrl+u`: page down / up
-- `Enter`: open comments
+- `Enter` / `Space` / `l` / `→`: open comments
 - `o`: open story in browser
 - `r`: refresh
 - `q` / `Esc`: quit
@@ -25,7 +25,9 @@ Comments:
 - `j/k` or `↓/↑`: move
 - `gg` / `G`: top / bottom
 - `Ctrl+d` / `Ctrl+u`: page down / up
-- `h/l` or `←/→` or `c`: collapse/expand selected thread
+- `h` / `←`: collapse selected thread
+- `l` / `→`: expand selected thread
+- `c`: toggle collapse/expand
 - `o`: open story in browser
 - `r`: refresh
 - `q` / `Esc`: back

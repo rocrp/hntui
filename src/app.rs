@@ -422,6 +422,7 @@ impl App {
             (View::Comments, Action::Refresh) => self.refresh_comments(),
 
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
+            (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenInBrowser) => {
                 if let Err(err) = self.open_selected_story_in_browser() {
                     self.last_error = Some(format!("{err:#}"));
@@ -524,6 +525,8 @@ impl App {
                     );
                 }
             }
+            (View::Comments, Action::Collapse) => self.collapse_selected_comment(),
+            (View::Comments, Action::Expand) => self.expand_selected_comment(),
             (View::Comments, Action::ToggleCollapse) => self.toggle_selected_comment_collapse(),
 
             (_, _) => {}
@@ -689,6 +692,56 @@ impl App {
         }
     }
 
+    fn collapse_selected_comment(&mut self) {
+        let Some(selected) = self.comment_list_state.selected() else {
+            return;
+        };
+        let Some(comment) = self.comment_list.get(selected) else {
+            return;
+        };
+        if comment.kids.is_empty() || comment.collapsed {
+            return;
+        }
+
+        let id = comment.id;
+        if set_collapse_in_tree(&mut self.comment_tree, id, true).is_none() {
+            self.last_error = Some(format!("comment not found id={id}"));
+            return;
+        }
+
+        self.rebuild_comment_list(Some(id));
+        ensure_visible(
+            &mut self.comment_list_state,
+            self.comment_list.len(),
+            self.comment_page_size,
+        );
+    }
+
+    fn expand_selected_comment(&mut self) {
+        let Some(selected) = self.comment_list_state.selected() else {
+            return;
+        };
+        let Some(comment) = self.comment_list.get(selected) else {
+            return;
+        };
+        if comment.kids.is_empty() || !comment.collapsed {
+            return;
+        }
+
+        let id = comment.id;
+        if set_collapse_in_tree(&mut self.comment_tree, id, false).is_none() {
+            self.last_error = Some(format!("comment not found id={id}"));
+            return;
+        }
+
+        self.rebuild_comment_list(Some(id));
+        ensure_visible(
+            &mut self.comment_list_state,
+            self.comment_list.len(),
+            self.comment_page_size,
+        );
+    }
+
     fn toggle_selected_comment_collapse(&mut self) {
         let Some(selected) = self.comment_list_state.selected() else {
             return;
@@ -731,6 +784,19 @@ fn toggle_collapse_in_tree(tree: &mut [CommentNode], target: u64) -> Option<()> 
             return Some(());
         }
         if toggle_collapse_in_tree(&mut node.children, target).is_some() {
+            return Some(());
+        }
+    }
+    None
+}
+
+fn set_collapse_in_tree(tree: &mut [CommentNode], target: u64, collapsed: bool) -> Option<()> {
+    for node in tree {
+        if node.comment.id == target {
+            node.comment.collapsed = collapsed;
+            return Some(());
+        }
+        if set_collapse_in_tree(&mut node.children, target, collapsed).is_some() {
             return Some(());
         }
     }

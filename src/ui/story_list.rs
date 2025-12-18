@@ -101,8 +101,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let importance = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
 
                 let accent = theme::rainbow(importance);
-
-                let title_color = theme::blend(theme::OVERLAY0, theme::TEXT, importance);
+                let color_t = importance.powf(1.2);
+                let title_color = theme::blend(theme::SUBTEXT1, accent, color_t);
                 let mut title_style = Style::default().fg(title_color);
                 if importance >= 0.9 {
                     title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
@@ -110,18 +110,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     title_style = title_style.add_modifier(Modifier::BOLD);
                 }
 
-                let mut score_style = Style::default().fg(theme::rainbow(score_level));
+                let score_accent = theme::rainbow(score_level);
+                let score_t = score_level.powf(1.4);
+                let mut score_style =
+                    Style::default().fg(theme::blend(theme::OVERLAY0, score_accent, score_t));
                 if score_level >= 0.85 {
                     score_style = score_style.add_modifier(Modifier::BOLD);
+                } else if score_level <= 0.25 {
+                    score_style = score_style.add_modifier(Modifier::DIM);
                 }
 
-                let mut comment_style = Style::default().fg(theme::rainbow(comment_level));
+                let comment_accent = theme::rainbow(comment_level);
+                let comment_t = comment_level.powf(1.4);
+                let mut comment_style =
+                    Style::default().fg(theme::blend(theme::OVERLAY0, comment_accent, comment_t));
                 if comment_level >= 0.85 {
                     comment_style = comment_style.add_modifier(Modifier::BOLD);
+                } else if comment_level <= 0.25 {
+                    comment_style = comment_style.add_modifier(Modifier::DIM);
                 }
 
                 ListItem::new(Line::from(vec![
-                    Span::styled("▌ ", Style::default().fg(accent)),
                     Span::styled(
                         format!("{:>2}. ", idx + 1),
                         Style::default().fg(theme::SUBTEXT1),
@@ -143,11 +152,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let list = List::new(items)
-        .highlight_symbol("▶ ")
+        .highlight_symbol("")
         .highlight_style(
             Style::default()
-                .bg(theme::SURFACE0)
-                .fg(theme::TEXT)
+                .bg(theme::SURFACE1)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
@@ -203,7 +211,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  Enter:comments  o:open  r:refresh  q:quit    {}/{} loaded",
+        "j/k:nav  Enter/Space/l/→:comments  o:open  r:refresh  q:quit    {}/{} loaded",
         app.stories.len(),
         app.story_ids.len()
     ));

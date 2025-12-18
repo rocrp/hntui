@@ -119,8 +119,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .repeat_highlight_symbol(false)
         .highlight_style(
             Style::default()
-                .bg(theme::SURFACE0)
-                .fg(theme::TEXT)
+                .bg(theme::SURFACE1)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
@@ -148,7 +147,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  h/l:collapse  o:open  r:refresh  q:back    {} comments",
+        "j/k:nav  h/←:collapse  l/→:expand  c:toggle  o:open  r:refresh  q:back    {} comments",
         app.comment_list.len()
     ));
     frame.render_widget(Paragraph::new(vec![meta, help]), footer_inner);

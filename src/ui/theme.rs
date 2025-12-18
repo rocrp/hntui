@@ -1,10 +1,9 @@
 use ratatui::style::Color;
 
-pub(crate) const SURFACE0: Color = Color::Rgb(49, 50, 68);
+pub(crate) const SURFACE1: Color = Color::Rgb(69, 71, 90);
 pub(crate) const OVERLAY0: Color = Color::Rgb(108, 112, 134);
 pub(crate) const SUBTEXT0: Color = Color::Rgb(166, 173, 200);
 pub(crate) const SUBTEXT1: Color = Color::Rgb(186, 194, 222);
-pub(crate) const TEXT: Color = Color::Rgb(205, 214, 244);
 
 pub(crate) const BLUE: Color = Color::Rgb(137, 180, 250);
 pub(crate) const SAPPHIRE: Color = Color::Rgb(116, 199, 236);
