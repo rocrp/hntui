@@ -56,19 +56,19 @@ rainbow = [
 [score_scale]
 # Desc min threshold order; last min must be 0.
 steps = [
-  { min = 500, color = "#FF4500" },
-  { min = 250, color = "#FF6B21" },
-  { min = 100, color = "#FF8C42" },
-  { min = 50, color = "#FFA563" },
-  { min = 0, color = "#FFB584" },
+  { min = 500, color = "#9F633F" },
+  { min = 250, color = "#925B3B" },
+  { min = 100, color = "#855337" },
+  { min = 50, color = "#794B33" },
+  { min = 0, color = "#6D432F" },
 ]
 
 [comment_scale]
 # Desc min threshold order; last min must be 0.
 steps = [
-  { min = 300, color = "#1E88E5" },
-  { min = 200, color = "#42A5F5" },
-  { min = 100, color = "#64B5F6" },
-  { min = 50, color = "#90CAF9" },
-  { min = 0, color = "#BBDEFB" },
+  { min = 300, color = "#5F76A4" },
+  { min = 200, color = "#586E9A" },
+  { min = 100, color = "#516690" },
+  { min = 50, color = "#4B5E86" },
+  { min = 0, color = "#45567C" },
 ]
