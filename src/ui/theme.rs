@@ -2,10 +2,11 @@ use anyhow::{anyhow, ensure, Context, Result};
 use ratatui::style::Color;
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 static THEME: OnceLock<Theme> = OnceLock::new();
+const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
 
 #[derive(Debug, Clone)]
 pub(crate) struct Theme {
@@ -93,10 +94,41 @@ struct PaletteConfig {
     rainbow: Vec<String>,
 }
 
-pub(crate) fn init_from_path(path: &Path) -> Result<()> {
+pub(crate) fn init_from_candidates(
+    paths: &[PathBuf],
+    allow_default: bool,
+) -> Result<Option<PathBuf>> {
+    ensure!(!paths.is_empty(), "ui config search paths must be non-empty");
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        init_from_path(path)?;
+        return Ok(Some(path.clone()));
+    }
+
+    if allow_default {
+        init_from_str("built-in ui config", DEFAULT_UI_CONFIG_TOML)?;
+        return Ok(None);
+    }
+
+    let tried = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(anyhow!("ui config not found; tried: {tried}"))
+}
+
+fn init_from_path(path: &Path) -> Result<()> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("read ui config {}", path.display()))?;
-    let config: ThemeConfig = toml::from_str(&contents).context("parse ui config toml")?;
+    init_from_str(&format!("ui config {}", path.display()), &contents)
+}
+
+fn init_from_str(label: &str, contents: &str) -> Result<()> {
+    let config: ThemeConfig = toml::from_str(contents)
+        .with_context(|| format!("parse {label} toml"))?;
     let theme = Theme::from_config(config)?;
     THEME
         .set(theme)

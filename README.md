@@ -16,6 +16,8 @@ cargo run --release
 Options: `--count`, `--page-size`, `--cache-size`, `--concurrency`, `--no-file-cache`, `--file-cache-dir`, `--file-cache-ttl-secs`, `--base-url`, `--ui-config`
 
 UI config: `ui-config.toml` (TOML, comments supported)
+Search order (unless `--ui-config`): `./ui-config.toml`, binary dir, OS config dir (ProjectDirs)
+If none found, built-in defaults are used.
 
 ## Cache
 

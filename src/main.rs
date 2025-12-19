@@ -44,9 +44,9 @@ pub struct Cli {
     #[arg(long, default_value = "https://hacker-news.firebaseio.com/v0")]
     pub base_url: String,
 
-    /// UI config file path.
-    #[arg(long, default_value = "ui-config.toml")]
-    pub ui_config: PathBuf,
+    /// UI config file path (optional; will search defaults).
+    #[arg(long)]
+    pub ui_config: Option<PathBuf>,
 }
 
 impl Cli {
@@ -63,19 +63,50 @@ impl Cli {
             !self.base_url.trim().is_empty(),
             "--base-url must be non-empty"
         );
-        anyhow::ensure!(
-            !self.ui_config.as_os_str().is_empty(),
-            "--ui-config must be non-empty"
-        );
+        if let Some(path) = &self.ui_config {
+            anyhow::ensure!(!path.as_os_str().is_empty(), "--ui-config must be non-empty");
+        }
         Ok(())
     }
+}
+
+fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
+    if let Some(path) = &cli.ui_config {
+        return vec![path.clone()];
+    }
+
+    let mut candidates = Vec::new();
+    let cwd = PathBuf::from("ui-config.toml");
+    if !candidates.contains(&cwd) {
+        candidates.push(cwd);
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let exe_cfg = exe_dir.join("ui-config.toml");
+            if !candidates.contains(&exe_cfg) {
+                candidates.push(exe_cfg);
+            }
+        }
+    }
+
+    if let Some(proj) = directories::ProjectDirs::from("dev", "hntui", "hntui") {
+        let cfg = proj.config_dir().join("ui-config.toml");
+        if !candidates.contains(&cfg) {
+            candidates.push(cfg);
+        }
+    }
+
+    candidates
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
-    ui::theme::init_from_path(&cli.ui_config)
-        .with_context(|| format!("load ui config {}", cli.ui_config.display()))?;
+    let ui_candidates = ui_config_candidates(&cli);
+    let allow_default = cli.ui_config.is_none();
+    ui::theme::init_from_candidates(&ui_candidates, allow_default)
+        .with_context(|| "load ui config")?;
     app::run(cli).await
 }
