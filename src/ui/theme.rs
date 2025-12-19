@@ -170,6 +170,14 @@ pub(crate) fn comment_color(comments: i64) -> Color {
     theme().comment_scale.color_for(comments)
 }
 
+pub(crate) fn score_level(score: i64) -> f64 {
+    theme().score_scale.level_for(score)
+}
+
+pub(crate) fn comment_level(comments: i64) -> f64 {
+    theme().comment_scale.level_for(comments)
+}
+
 fn theme() -> &'static Theme {
     THEME
         .get()
@@ -278,6 +286,19 @@ impl Scale {
             .last()
             .expect("scale steps must be non-empty")
             .color
+    }
+
+    fn level_for(&self, value: i64) -> f64 {
+        let idx = self
+            .steps
+            .iter()
+            .position(|step| value >= step.min)
+            .unwrap_or(self.steps.len().saturating_sub(1));
+        if self.steps.len() == 1 {
+            return 1.0;
+        }
+        let denom = (self.steps.len() - 1) as f64;
+        (1.0 - (idx as f64 / denom)).clamp(0.0, 1.0)
     }
 }
 
