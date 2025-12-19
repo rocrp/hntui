@@ -517,13 +517,23 @@ impl App {
             (View::Stories, Action::Enter) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
             (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
-            (View::Stories, Action::OpenInBrowser) => {
+            (View::Stories, Action::OpenPrimaryBrowser) => {
                 if let Err(err) = self.open_selected_story_in_browser() {
                     self.last_error = Some(format!("{err:#}"));
                 }
             }
-            (View::Comments, Action::OpenInBrowser) => {
+            (View::Stories, Action::OpenSecondaryBrowser) => {
+                if let Err(err) = self.open_selected_story_comments_in_browser() {
+                    self.last_error = Some(format!("{err:#}"));
+                }
+            }
+            (View::Comments, Action::OpenPrimaryBrowser) => {
                 if let Err(err) = self.open_current_story_comments_in_browser() {
+                    self.last_error = Some(format!("{err:#}"));
+                }
+            }
+            (View::Comments, Action::OpenSecondaryBrowser) => {
+                if let Err(err) = self.open_current_story_in_browser() {
                     self.last_error = Some(format!("{err:#}"));
                 }
             }
@@ -816,6 +826,16 @@ impl App {
 
     fn open_selected_story_in_browser(&self) -> Result<()> {
         let story = self.selected_story().context("no selected story")?;
+        open_story(story)
+    }
+
+    fn open_selected_story_comments_in_browser(&self) -> Result<()> {
+        let story = self.selected_story().context("no selected story")?;
+        open_story_comments(story)
+    }
+
+    fn open_current_story_in_browser(&self) -> Result<()> {
+        let story = self.current_story.as_ref().context("no current story")?;
         open_story(story)
     }
 

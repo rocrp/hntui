@@ -35,6 +35,7 @@ Stories:
 - `Ctrl+d` / `Ctrl+u`: page down / up
 - `Enter` / `Space` / `l` / `→`: open comments
 - `o`: open source link in browser
+- `O`: open comments page in browser
 - `r`: refresh
 - `?`: help
 - `q` / `Esc`: quit
@@ -47,6 +48,7 @@ Comments:
 - `l` / `→`: expand selected thread (lazy-load children)
 - `Enter` / `c`: toggle collapse/expand
 - `o`: open comments page in browser
+- `O`: open source link in browser
 - `r`: refresh
 - `?`: help
 - `q` / `Esc`: back

@@ -11,7 +11,8 @@ pub enum Action {
     ToggleHelp,
     Enter,
     OpenComments,
-    OpenInBrowser,
+    OpenPrimaryBrowser,
+    OpenSecondaryBrowser,
     BackOrQuit,
     Collapse,
     Expand,
@@ -52,7 +53,9 @@ impl KeyState {
                     | (KeyCode::Char('G'), KeyModifiers::NONE) => Some(Action::GoBottom),
                     (KeyCode::Enter, _) => Some(Action::Enter),
                     (KeyCode::Char(' '), KeyModifiers::NONE) => Some(Action::OpenComments),
-                    (KeyCode::Char('o'), KeyModifiers::NONE) => Some(Action::OpenInBrowser),
+                    (KeyCode::Char('o'), KeyModifiers::NONE) => Some(Action::OpenPrimaryBrowser),
+                    (KeyCode::Char('o'), KeyModifiers::SHIFT)
+                    | (KeyCode::Char('O'), _) => Some(Action::OpenSecondaryBrowser),
                     (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, _) => {
                         Some(Action::BackOrQuit)
                     }
