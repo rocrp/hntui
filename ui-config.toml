@@ -59,8 +59,8 @@ steps = [
   { min = 500, color = "#9F633F" },
   { min = 250, color = "#925B3B" },
   { min = 100, color = "#855337" },
-  { min = 50, color = "#794B33" },
-  { min = 0, color = "#6D432F" },
+  { min = 50, color = "#5F433A" },
+  { min = 0, color = "#3F2E2B" },
 ]
 
 [comment_scale]
@@ -69,6 +69,6 @@ steps = [
   { min = 300, color = "#5F76A4" },
   { min = 200, color = "#586E9A" },
   { min = 100, color = "#516690" },
-  { min = 50, color = "#4B5E86" },
-  { min = 0, color = "#45567C" },
+  { min = 50, color = "#45526E" },
+  { min = 0, color = "#353E5B" },
 ]
