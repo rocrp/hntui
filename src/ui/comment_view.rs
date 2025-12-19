@@ -31,9 +31,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
-    let comment_max_lines = theme::layout().comment_max_lines.max(1);
+    let layout = theme::layout();
+    let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
+    let comment_page_hint = layout.comment_max_lines.unwrap_or(1).max(1);
     app.comment_page_size = (list_area.height as usize)
-        .saturating_div(comment_max_lines)
+        .saturating_div(comment_page_hint)
         .max(1);
     let content_width = list_area.width as usize;
 

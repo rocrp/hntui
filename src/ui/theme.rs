@@ -37,7 +37,7 @@ pub(crate) struct Palette {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Layout {
-    pub(crate) comment_max_lines: usize,
+    pub(crate) comment_max_lines: Option<usize>,
     pub(crate) comment_default_visible_levels: usize,
 }
 
@@ -68,7 +68,7 @@ struct FontConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LayoutConfig {
-    comment_max_lines: usize,
+    comment_max_lines: i64,
     comment_default_visible_levels: usize,
 }
 
@@ -134,10 +134,17 @@ impl Theme {
             !config.font.weight.trim().is_empty(),
             "font.weight must be non-empty"
         );
-        ensure!(
-            config.layout.comment_max_lines > 0,
-            "layout.comment_max_lines must be > 0"
-        );
+        let comment_max_lines = if config.layout.comment_max_lines == -1 {
+            None
+        } else {
+            ensure!(
+                config.layout.comment_max_lines > 0,
+                "layout.comment_max_lines must be > 0 or -1"
+            );
+            let value = usize::try_from(config.layout.comment_max_lines)
+                .with_context(|| "layout.comment_max_lines overflow")?;
+            Some(value)
+        };
         ensure!(
             config.layout.comment_default_visible_levels > 0,
             "layout.comment_default_visible_levels must be > 0"
@@ -145,7 +152,7 @@ impl Theme {
 
         let palette = Palette::from_config(config.palette)?;
         let layout = Layout {
-            comment_max_lines: config.layout.comment_max_lines,
+            comment_max_lines,
             comment_default_visible_levels: config.layout.comment_default_visible_levels,
         };
         let typography = Typography {

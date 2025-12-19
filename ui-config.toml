@@ -8,7 +8,8 @@ weight = "regular"
 
 [layout]
 # Max lines per comment; shorter comments take fewer lines automatically.
-comment_max_lines = 2
+# Use -1 for no limit.
+comment_max_lines = -1
 # Visible comment levels by default (1 = only top-level, 2 = top-level + replies).
 comment_default_visible_levels = 2
 
