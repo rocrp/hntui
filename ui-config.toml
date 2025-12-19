@@ -9,46 +9,46 @@ comment_default_visible_levels = 2
 
 [palette]
 # List highlight background + help popup background.
-surface2 = "#585B70"
+surface2 = "#414559"
 # Separators, subtle punctuation, domain text, comment age tail.
-overlay0 = "#6C7086"
+overlay0 = "#737994"
 # Secondary metadata (author, low-emphasis labels).
-subtext0 = "#A6ADC8"
+subtext0 = "#A5ADCE"
 # Hints and indexes (help text, story index).
-subtext1 = "#BAC2DE"
+subtext1 = "#B5BFE2"
 # Primary foreground text.
-text = "#CDD6F4"
+text = "#C6D0F5"
 # Unused by default; available for custom widgets.
-blue = "#89B4FA"
+blue = "#8CAAEE"
 # Unused by default; available for custom widgets.
-sapphire = "#74C7EC"
+sapphire = "#85C1DC"
 # Unused by default; available for custom widgets.
-sky = "#89DCEB"
+sky = "#99D1DB"
 # Unused by default; available for custom widgets.
-teal = "#94E2D5"
+teal = "#81C8BE"
 # Unused by default; available for custom widgets.
-green = "#A6E3A1"
+green = "#A6D189"
 # Unused by default; available for custom widgets.
-yellow = "#F9E2AF"
+yellow = "#E5C890"
 # Unused by default; available for custom widgets.
-peach = "#FAB387"
+peach = "#EF9F76"
 # Error text.
-red = "#F38BA8"
+red = "#E78284"
 # Active section heading (help popup).
-mauve = "#CBA6F7"
+mauve = "#CA9EE6"
 # Unused by default; available for custom widgets.
-pink = "#F5C2E7"
+pink = "#F4B8E4"
 
 # Comment depth + story score/comment accents (first is low emphasis, last is high).
 rainbow = [
-  "#89B4FA",
-  "#74C7EC",
-  "#89DCEB",
-  "#94E2D5",
-  "#A6E3A1",
-  "#F9E2AF",
-  "#FAB387",
-  "#F38BA8",
-  "#CBA6F7",
-  "#F5C2E7",
+  "#8CAAEE",
+  "#85C1DC",
+  "#99D1DB",
+  "#81C8BE",
+  "#A6D189",
+  "#E5C890",
+  "#EF9F76",
+  "#E78284",
+  "#CA9EE6",
+  "#F4B8E4",
 ]
