@@ -31,9 +31,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
-    let comment_item_height = theme::layout().comment_max_lines.max(1);
+    let comment_max_lines = theme::layout().comment_max_lines.max(1);
     app.comment_page_size = (list_area.height as usize)
-        .saturating_div(comment_item_height)
+        .saturating_div(comment_max_lines)
         .max(1);
     let content_width = list_area.width as usize;
 
@@ -95,10 +95,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
                 let plain = hn_html_to_plain(&comment.text);
                 let wrapped =
-                    wrap_plain(&plain, first_width.max(1), next_width, comment_item_height);
+                    wrap_plain(&plain, first_width.max(1), next_width, comment_max_lines);
                 let header_content = wrapped.first().cloned().unwrap_or_default();
 
-                let mut lines = Vec::with_capacity(comment_item_height);
+                let mut lines = Vec::with_capacity(wrapped.len());
                 lines.push(Line::from(vec![
                     Span::styled(indent.clone(), indent_style),
                     Span::styled(format!("{thread_marker} "), marker_style),
@@ -108,20 +108,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled(tail, tail_style),
                 ]));
 
-                let mut tail_lines = wrapped.into_iter().skip(1);
-                for _ in 0..comment_item_height.saturating_sub(1) {
-                    if let Some(line) = tail_lines.next() {
-                        lines.push(Line::from(vec![
-                            Span::styled(indent.clone(), indent_style),
-                            Span::raw("  "),
-                            Span::styled(line, content_style),
-                        ]));
-                    } else {
-                        lines.push(Line::from(vec![
-                            Span::styled(indent.clone(), indent_style),
-                            Span::raw("  "),
-                        ]));
-                    }
+                for line in wrapped.into_iter().skip(1) {
+                    lines.push(Line::from(vec![
+                        Span::styled(indent.clone(), indent_style),
+                        Span::raw("  "),
+                        Span::styled(line, content_style),
+                    ]));
                 }
 
                 ListItem::new(lines)

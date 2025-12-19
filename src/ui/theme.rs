@@ -94,8 +94,7 @@ struct PaletteConfig {
 pub(crate) fn init_from_path(path: &Path) -> Result<()> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("read ui config {}", path.display()))?;
-    let config: ThemeConfig =
-        serde_json::from_str(&contents).context("parse ui config json")?;
+    let config: ThemeConfig = toml::from_str(&contents).context("parse ui config toml")?;
     let theme = Theme::from_config(config)?;
     THEME
         .set(theme)

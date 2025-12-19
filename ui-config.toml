@@ -1,0 +1,57 @@
+# UI configuration (TOML supports comments).
+
+[font]
+# Stored for reference; the TUI itself doesn't set terminal fonts.
+family = "Iosevka Term"
+size = 16.0
+weight = "regular"
+
+[layout]
+# Max lines per comment; shorter comments take fewer lines automatically.
+comment_max_lines = 2
+
+[palette]
+# List highlight background + help popup background.
+surface2 = "#585B70"
+# Separators, subtle punctuation, domain text, comment age tail.
+overlay0 = "#6C7086"
+# Secondary metadata (author, low-emphasis labels).
+subtext0 = "#A6ADC8"
+# Hints and indexes (help text, story index).
+subtext1 = "#BAC2DE"
+# Primary foreground text.
+text = "#CDD6F4"
+# Unused by default; available for custom widgets.
+blue = "#89B4FA"
+# Unused by default; available for custom widgets.
+sapphire = "#74C7EC"
+# Unused by default; available for custom widgets.
+sky = "#89DCEB"
+# Unused by default; available for custom widgets.
+teal = "#94E2D5"
+# Unused by default; available for custom widgets.
+green = "#A6E3A1"
+# Unused by default; available for custom widgets.
+yellow = "#F9E2AF"
+# Unused by default; available for custom widgets.
+peach = "#FAB387"
+# Error text.
+red = "#F38BA8"
+# Active section heading (help popup).
+mauve = "#CBA6F7"
+# Unused by default; available for custom widgets.
+pink = "#F5C2E7"
+
+# Comment depth + story score/comment accents (first is low emphasis, last is high).
+rainbow = [
+  "#89B4FA",
+  "#74C7EC",
+  "#89DCEB",
+  "#94E2D5",
+  "#A6E3A1",
+  "#F9E2AF",
+  "#FAB387",
+  "#F38BA8",
+  "#CBA6F7",
+  "#F5C2E7",
+]

@@ -45,7 +45,7 @@ pub struct Cli {
     pub base_url: String,
 
     /// UI config file path.
-    #[arg(long, default_value = "ui-config.json")]
+    #[arg(long, default_value = "ui-config.toml")]
     pub ui_config: PathBuf,
 }
 
