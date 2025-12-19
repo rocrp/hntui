@@ -2,6 +2,11 @@
 
 Hacker News TUI (top stories + nested comments) using the official Firebase API.
 
+## Screenshots
+
+![Stories view](screenshots/hntui1.png)
+![Comments view](screenshots/hntui2.png)
+
 ## Run
 
 ```bash
