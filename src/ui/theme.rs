@@ -12,6 +12,8 @@ const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
 pub(crate) struct Theme {
     pub(crate) palette: Palette,
     pub(crate) layout: Layout,
+    pub(crate) score_scale: Scale,
+    pub(crate) comment_scale: Scale,
 }
 
 #[allow(dead_code)]
@@ -41,11 +43,24 @@ pub(crate) struct Layout {
     pub(crate) comment_default_visible_levels: usize,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct Scale {
+    steps: Vec<ScaleStep>,
+}
+
+#[derive(Debug, Clone)]
+struct ScaleStep {
+    min: i64,
+    color: Color,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ThemeConfig {
     layout: LayoutConfig,
     palette: PaletteConfig,
+    score_scale: ScaleConfig,
+    comment_scale: ScaleConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +89,19 @@ struct PaletteConfig {
     mauve: String,
     pink: String,
     rainbow: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaleConfig {
+    steps: Vec<ScaleStepConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaleStepConfig {
+    min: i64,
+    color: String,
 }
 
 pub(crate) fn init_from_candidates(
@@ -134,6 +162,14 @@ pub(crate) fn layout() -> &'static Layout {
     &theme().layout
 }
 
+pub(crate) fn score_color(score: i64) -> Color {
+    theme().score_scale.color_for(score)
+}
+
+pub(crate) fn comment_color(comments: i64) -> Color {
+    theme().comment_scale.color_for(comments)
+}
+
 fn theme() -> &'static Theme {
     THEME
         .get()
@@ -163,10 +199,14 @@ impl Theme {
             comment_max_lines,
             comment_default_visible_levels: config.layout.comment_default_visible_levels,
         };
+        let score_scale = Scale::from_config("score_scale", config.score_scale)?;
+        let comment_scale = Scale::from_config("comment_scale", config.comment_scale)?;
 
         Ok(Self {
             palette,
             layout,
+            score_scale,
+            comment_scale,
         })
     }
 }
@@ -193,6 +233,51 @@ impl Palette {
             pink: parse_hex_color("palette.pink", &config.pink)?,
             rainbow,
         })
+    }
+}
+
+impl Scale {
+    fn from_config(label: &str, config: ScaleConfig) -> Result<Self> {
+        ensure!(
+            !config.steps.is_empty(),
+            "{label}.steps must be non-empty"
+        );
+        let mut steps = Vec::with_capacity(config.steps.len());
+        let mut prev_min: Option<i64> = None;
+        for (idx, step) in config.steps.into_iter().enumerate() {
+            ensure!(
+                step.min >= 0,
+                "{label}.steps[{idx}].min must be >= 0"
+            );
+            if let Some(prev) = prev_min {
+                ensure!(
+                    step.min < prev,
+                    "{label}.steps[{idx}].min must be < previous min {prev}"
+                );
+            }
+            let color =
+                parse_hex_color(&format!("{label}.steps[{idx}].color"), &step.color)?;
+            steps.push(ScaleStep {
+                min: step.min,
+                color,
+            });
+            prev_min = Some(step.min);
+        }
+        let last = steps.last().expect("scale steps non-empty");
+        ensure!(last.min == 0, "{label}.steps last min must be 0");
+        Ok(Self { steps })
+    }
+
+    fn color_for(&self, value: i64) -> Color {
+        for step in &self.steps {
+            if value >= step.min {
+                return step.color;
+            }
+        }
+        self.steps
+            .last()
+            .expect("scale steps must be non-empty")
+            .color
     }
 }
 

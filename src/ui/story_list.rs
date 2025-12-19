@@ -113,27 +113,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     title_style = title_style.add_modifier(Modifier::BOLD);
                 }
 
-                let score_accent = theme::rainbow(score_level);
-                let score_t = score_level.powf(1.4);
-                let mut score_style =
-                    Style::default()
-                        .fg(theme::blend(theme::palette().subtext0, score_accent, score_t));
-                if score_level >= 0.85 {
-                    score_style = score_style.add_modifier(Modifier::BOLD);
-                } else if score_level <= 0.25 {
-                    score_style = score_style.add_modifier(Modifier::DIM);
-                }
-
-                let comment_accent = theme::rainbow(comment_level);
-                let comment_t = comment_level.powf(1.4);
-                let mut comment_style =
-                    Style::default()
-                        .fg(theme::blend(theme::palette().subtext0, comment_accent, comment_t));
-                if comment_level >= 0.85 {
-                    comment_style = comment_style.add_modifier(Modifier::BOLD);
-                } else if comment_level <= 0.25 {
-                    comment_style = comment_style.add_modifier(Modifier::DIM);
-                }
+                let score_style = Style::default()
+                    .fg(theme::score_color(story.score))
+                    .add_modifier(Modifier::BOLD);
+                let comment_style = Style::default()
+                    .fg(theme::comment_color(story.comment_count))
+                    .add_modifier(Modifier::BOLD);
 
                 ListItem::new(Line::from(vec![
                     Span::styled(
@@ -181,10 +166,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             normalize_i64(story.comment_count, stats.min_comments, stats.max_comments);
 
         let score_style = Style::default()
-            .fg(theme::rainbow(score_level))
+            .fg(theme::score_color(story.score))
             .add_modifier(Modifier::BOLD);
         let comment_style = Style::default()
-            .fg(theme::rainbow(comment_level))
+            .fg(theme::comment_color(story.comment_count))
             .add_modifier(Modifier::BOLD);
 
         let mut spans = vec![
@@ -211,7 +196,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  Enter/Space/l/→:comments  o:source  r:refresh  ?:help  q:quit    {}/{} loaded",
+        "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  r:refresh  ?:help  q:quit    {}/{} loaded",
         app.stories.len(),
         app.story_ids.len()
     ));
