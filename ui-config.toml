@@ -1,11 +1,5 @@
 # UI configuration (TOML supports comments).
 
-[font]
-# Stored for reference; the TUI itself doesn't set terminal fonts.
-family = "Iosevka Term"
-size = 16.0
-weight = "regular"
-
 [layout]
 # Max lines per comment; shorter comments take fewer lines automatically.
 # Use -1 for no limit.

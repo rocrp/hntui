@@ -12,7 +12,6 @@ const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
 pub(crate) struct Theme {
     pub(crate) palette: Palette,
     pub(crate) layout: Layout,
-    pub(crate) typography: Typography,
 }
 
 #[allow(dead_code)]
@@ -42,28 +41,11 @@ pub(crate) struct Layout {
     pub(crate) comment_default_visible_levels: usize,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) struct Typography {
-    pub(crate) family: String,
-    pub(crate) size: f32,
-    pub(crate) weight: String,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ThemeConfig {
-    font: FontConfig,
     layout: LayoutConfig,
     palette: PaletteConfig,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FontConfig {
-    family: String,
-    size: f32,
-    weight: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,8 +109,16 @@ fn init_from_path(path: &Path) -> Result<()> {
 }
 
 fn init_from_str(label: &str, contents: &str) -> Result<()> {
-    let config: ThemeConfig = toml::from_str(contents)
-        .with_context(|| format!("parse {label} toml"))?;
+    let raw: toml::Value =
+        toml::from_str(contents).with_context(|| format!("parse {label} toml"))?;
+    if raw.get("font").is_some() {
+        return Err(anyhow!(
+            "ui config no longer supports [font]; remove the [font] section and set font in your terminal emulator"
+        ));
+    }
+    let config: ThemeConfig = raw
+        .try_into()
+        .with_context(|| format!("decode {label} toml"))?;
     let theme = Theme::from_config(config)?;
     THEME
         .set(theme)
@@ -144,11 +134,6 @@ pub(crate) fn layout() -> &'static Layout {
     &theme().layout
 }
 
-#[allow(dead_code)]
-pub(crate) fn typography() -> &'static Typography {
-    &theme().typography
-}
-
 fn theme() -> &'static Theme {
     THEME
         .get()
@@ -157,15 +142,6 @@ fn theme() -> &'static Theme {
 
 impl Theme {
     fn from_config(config: ThemeConfig) -> Result<Self> {
-        ensure!(config.font.size > 0.0, "font.size must be > 0");
-        ensure!(
-            !config.font.family.trim().is_empty(),
-            "font.family must be non-empty"
-        );
-        ensure!(
-            !config.font.weight.trim().is_empty(),
-            "font.weight must be non-empty"
-        );
         let comment_max_lines = if config.layout.comment_max_lines == -1 {
             None
         } else {
@@ -187,16 +163,10 @@ impl Theme {
             comment_max_lines,
             comment_default_visible_levels: config.layout.comment_default_visible_levels,
         };
-        let typography = Typography {
-            family: config.font.family,
-            size: config.font.size,
-            weight: config.font.weight,
-        };
 
         Ok(Self {
             palette,
             layout,
-            typography,
         })
     }
 }
