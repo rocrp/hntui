@@ -13,22 +13,22 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     let header_style = Style::default()
-        .fg(theme::TEXT)
+        .fg(theme::palette().text)
         .add_modifier(Modifier::BOLD);
-    let hint_style = Style::default().fg(theme::SUBTEXT1);
+    let hint_style = Style::default().fg(theme::palette().subtext1);
     let key_style = Style::default()
-        .fg(theme::TEXT)
+        .fg(theme::palette().text)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(theme::SUBTEXT1);
+    let desc_style = Style::default().fg(theme::palette().subtext1);
 
     fn section_title(name: &str, active: bool) -> Line<'static> {
         let style = if active {
             Style::default()
-                .fg(theme::MAUVE)
+                .fg(theme::palette().mauve)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
-                .fg(theme::SUBTEXT0)
+                .fg(theme::palette().subtext0)
                 .add_modifier(Modifier::BOLD)
         };
         Line::from(Span::styled(name.to_string(), style))
@@ -104,7 +104,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: true })
         .block(block)
-        .style(Style::default().bg(theme::SURFACE2));
+        .style(Style::default().bg(theme::palette().surface2));
     frame.render_widget(paragraph, popup);
 }
 

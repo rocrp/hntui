@@ -3,7 +3,7 @@ use crate::ui::theme;
 use crate::ui::{domain_from_url, format_age, now_unix};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
@@ -102,7 +102,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let accent = theme::rainbow(importance);
                 let color_t = importance.powf(1.2);
                 let base_t = (0.35 + (importance.powf(0.8) * 0.65)).clamp(0.0, 1.0);
-                let title_base = theme::blend(theme::SUBTEXT1, theme::TEXT, base_t);
+                let title_base =
+                    theme::blend(theme::palette().subtext1, theme::palette().text, base_t);
                 let title_color = theme::blend(title_base, accent, color_t);
                 let mut title_style = Style::default().fg(title_color);
                 if importance >= 0.9 {
@@ -114,7 +115,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let score_accent = theme::rainbow(score_level);
                 let score_t = score_level.powf(1.4);
                 let mut score_style =
-                    Style::default().fg(theme::blend(theme::SUBTEXT0, score_accent, score_t));
+                    Style::default()
+                        .fg(theme::blend(theme::palette().subtext0, score_accent, score_t));
                 if score_level >= 0.85 {
                     score_style = score_style.add_modifier(Modifier::BOLD);
                 } else if score_level <= 0.25 {
@@ -124,7 +126,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let comment_accent = theme::rainbow(comment_level);
                 let comment_t = comment_level.powf(1.4);
                 let mut comment_style =
-                    Style::default().fg(theme::blend(theme::SUBTEXT0, comment_accent, comment_t));
+                    Style::default()
+                        .fg(theme::blend(theme::palette().subtext0, comment_accent, comment_t));
                 if comment_level >= 0.85 {
                     comment_style = comment_style.add_modifier(Modifier::BOLD);
                 } else if comment_level <= 0.25 {
@@ -134,18 +137,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         format!("{:>2}. ", idx + 1),
-                        Style::default().fg(theme::SUBTEXT1),
+                        Style::default().fg(theme::palette().subtext1),
                     ),
                     Span::styled(title, title_style),
                     Span::styled(
                         format!(" ({domain})"),
                         Style::default()
-                            .fg(theme::OVERLAY0)
+                            .fg(theme::palette().overlay0)
                             .add_modifier(Modifier::ITALIC | Modifier::DIM),
                     ),
                     Span::raw("  "),
                     Span::styled(format!("{}", story.score), score_style),
-                    Span::styled("·", Style::default().fg(theme::OVERLAY0)),
+                    Span::styled("·", Style::default().fg(theme::palette().overlay0)),
                     Span::styled(format!("{}", story.comment_count), comment_style),
                 ]))
             })
@@ -154,7 +157,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let list = List::new(items).highlight_symbol("").highlight_style(
         Style::default()
-            .bg(theme::SURFACE2)
+            .bg(theme::palette().surface2)
             .add_modifier(Modifier::BOLD),
     );
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
@@ -167,7 +170,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let meta = if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {err}"),
-            Style::default().fg(Color::Red),
+            Style::default().fg(theme::palette().red),
         )])
     } else if let Some(story) = app.selected_story() {
         let age = format_age(story.time, now);
@@ -186,7 +189,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut spans = vec![
             Span::styled(format!("{} pts", story.score), score_style),
             Span::raw(format!(" by {} ", story.by)),
-            Span::styled(format!("{age}"), Style::default().fg(theme::SUBTEXT0)),
+            Span::styled(format!("{age}"), Style::default().fg(theme::palette().subtext0)),
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];
@@ -195,7 +198,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             spans.push(Span::styled(
                 "loading more…",
                 Style::default()
-                    .fg(theme::SUBTEXT0)
+                    .fg(theme::palette().subtext0)
                     .add_modifier(Modifier::ITALIC),
             ));
         }

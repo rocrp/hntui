@@ -5,6 +5,7 @@ mod state;
 mod tui;
 mod ui;
 
+use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -42,6 +43,10 @@ pub struct Cli {
     /// Hacker News API base URL.
     #[arg(long, default_value = "https://hacker-news.firebaseio.com/v0")]
     pub base_url: String,
+
+    /// UI config file path.
+    #[arg(long, default_value = "ui-config.json")]
+    pub ui_config: PathBuf,
 }
 
 impl Cli {
@@ -58,6 +63,10 @@ impl Cli {
             !self.base_url.trim().is_empty(),
             "--base-url must be non-empty"
         );
+        anyhow::ensure!(
+            !self.ui_config.as_os_str().is_empty(),
+            "--ui-config must be non-empty"
+        );
         Ok(())
     }
 }
@@ -66,5 +75,7 @@ impl Cli {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
+    ui::theme::init_from_path(&cli.ui_config)
+        .with_context(|| format!("load ui config {}", cli.ui_config.display()))?;
     app::run(cli).await
 }
