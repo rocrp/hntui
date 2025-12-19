@@ -3,6 +3,7 @@ use crate::input::{Action, KeyState};
 use crate::state::StateStore;
 use crate::tui::Tui;
 use crate::ui;
+use crate::ui::theme;
 use crate::Cli;
 use anyhow::{Context, Result};
 use crossterm::event::{Event, EventStream, KeyEventKind};
@@ -486,6 +487,7 @@ impl App {
         self.last_error = None;
         self.current_story = Some(story);
         self.comment_tree = comments;
+        self.apply_default_comment_expansion();
         self.rebuild_comment_list(None);
         self.comment_list_state.select(Some(0));
         *self.comment_list_state.offset_mut() = 0;
@@ -842,6 +844,24 @@ impl App {
         if let Some(idx) = self.comment_list.iter().position(|c| c.id == id) {
             self.comment_list_state.select(Some(idx));
         }
+    }
+
+    fn apply_default_comment_expansion(&mut self) {
+        let visible_levels = theme::layout().comment_default_visible_levels;
+        let expand_depth_exclusive = visible_levels.saturating_sub(1);
+
+        fn walk(nodes: &mut [CommentNode], expand_depth_exclusive: usize) {
+            for node in nodes {
+                if node.comment.depth < expand_depth_exclusive && !node.comment.kids.is_empty() {
+                    node.comment.collapsed = false;
+                }
+                if !node.children.is_empty() {
+                    walk(&mut node.children, expand_depth_exclusive);
+                }
+            }
+        }
+
+        walk(&mut self.comment_tree, expand_depth_exclusive);
     }
 
     fn start_loading_comment_children(&mut self, parent_id: u64) {

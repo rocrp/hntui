@@ -38,6 +38,7 @@ pub(crate) struct Palette {
 #[derive(Debug, Clone)]
 pub(crate) struct Layout {
     pub(crate) comment_max_lines: usize,
+    pub(crate) comment_default_visible_levels: usize,
 }
 
 #[allow(dead_code)]
@@ -68,6 +69,7 @@ struct FontConfig {
 #[serde(deny_unknown_fields)]
 struct LayoutConfig {
     comment_max_lines: usize,
+    comment_default_visible_levels: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,10 +138,15 @@ impl Theme {
             config.layout.comment_max_lines > 0,
             "layout.comment_max_lines must be > 0"
         );
+        ensure!(
+            config.layout.comment_default_visible_levels > 0,
+            "layout.comment_default_visible_levels must be > 0"
+        );
 
         let palette = Palette::from_config(config.palette)?;
         let layout = Layout {
             comment_max_lines: config.layout.comment_max_lines,
+            comment_default_visible_levels: config.layout.comment_default_visible_levels,
         };
         let typography = Typography {
             family: config.font.family,
