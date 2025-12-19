@@ -44,7 +44,7 @@ Comments:
 - `h` / `←`: collapse selected thread
 - `l` / `→`: expand selected thread (lazy-load children)
 - `Enter` / `c`: toggle collapse/expand
-- `o`: open source link in browser
+- `o`: open comments page in browser
 - `r`: refresh
 - `?`: help
 - `q` / `Esc`: back

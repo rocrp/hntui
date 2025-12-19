@@ -523,7 +523,7 @@ impl App {
                 }
             }
             (View::Comments, Action::OpenInBrowser) => {
-                if let Err(err) = self.open_current_story_in_browser() {
+                if let Err(err) = self.open_current_story_comments_in_browser() {
                     self.last_error = Some(format!("{err:#}"));
                 }
             }
@@ -824,6 +824,11 @@ impl App {
         open_story(story)
     }
 
+    fn open_current_story_comments_in_browser(&self) -> Result<()> {
+        let story = self.current_story.as_ref().context("no current story")?;
+        open_story_comments(story)
+    }
+
     fn rebuild_comment_list(&mut self, preserve_comment_id: Option<u64>) {
         fn walk(nodes: &[CommentNode], out: &mut Vec<crate::api::types::Comment>) {
             for node in nodes {
@@ -1004,6 +1009,12 @@ fn open_story(story: &Story) -> Result<()> {
         .clone()
         .unwrap_or_else(|| format!("https://news.ycombinator.com/item?id={}", story.id));
     open::that(url).context("open in browser")?;
+    Ok(())
+}
+
+fn open_story_comments(story: &Story) -> Result<()> {
+    let url = format!("https://news.ycombinator.com/item?id={}", story.id);
+    open::that(url).context("open comments in browser")?;
     Ok(())
 }
 
