@@ -819,11 +819,6 @@ impl App {
         open_story(story)
     }
 
-    fn open_current_story_in_browser(&self) -> Result<()> {
-        let story = self.current_story.as_ref().context("no current story")?;
-        open_story(story)
-    }
-
     fn open_current_story_comments_in_browser(&self) -> Result<()> {
         let story = self.current_story.as_ref().context("no current story")?;
         open_story_comments(story)

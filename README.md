@@ -18,6 +18,7 @@ Options: `--count`, `--page-size`, `--cache-size`, `--concurrency`, `--no-file-c
 UI config: `ui-config.toml` (TOML, comments supported)
 Search order (unless `--ui-config`): `./ui-config.toml`, binary dir, OS config dir (ProjectDirs)
 If none found, built-in defaults are used.
+Layout keys: `comment_max_lines` (`-1` = unlimited), `comment_default_visible_levels` (1 = top only, 2 = top + replies)
 
 ## Cache
 
