@@ -101,16 +101,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let importance = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
 
                 let accent = theme::rainbow(importance);
-                let color_t = importance.powf(1.2);
-                let base_t = (0.35 + (importance.powf(0.8) * 0.65)).clamp(0.0, 1.0);
+                let color_t = importance.powf(1.3);
+                let base_t = importance.powf(0.9).clamp(0.0, 1.0);
                 let title_base =
-                    theme::blend(theme::palette().subtext1, theme::palette().text, base_t);
+                    theme::blend(theme::palette().subtext0, theme::palette().text, base_t);
                 let title_color = theme::blend(title_base, accent, color_t);
                 let mut title_style = Style::default().fg(title_color);
                 if importance >= 0.9 {
                     title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                 } else if importance >= 0.75 {
                     title_style = title_style.add_modifier(Modifier::BOLD);
+                } else if importance <= 0.2 {
+                    title_style = title_style.add_modifier(Modifier::DIM);
                 }
 
                 let score_style = Style::default()
