@@ -34,7 +34,7 @@ Comments:
 - `Ctrl+d` / `Ctrl+u`: page down / up
 - `h` / `←`: collapse selected thread
 - `l` / `→`: expand selected thread (lazy-load children)
-- `c`: toggle collapse/expand
+- `Enter` / `c`: toggle collapse/expand
 - `o`: open source link in browser
 - `r`: refresh
 - `?`: help

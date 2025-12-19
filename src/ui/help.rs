@@ -88,7 +88,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         key_style,
         desc_style,
     ));
-    lines.push(kv("c", "toggle collapse/expand", key_style, desc_style));
+    lines.push(kv(
+        "Enter / c",
+        "toggle collapse/expand",
+        key_style,
+        desc_style,
+    ));
     lines.push(kv("o", "open source link (browser)", key_style, desc_style));
     lines.push(kv("r", "refresh", key_style, desc_style));
     lines.push(kv("q / Esc", "back", key_style, desc_style));

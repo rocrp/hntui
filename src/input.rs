@@ -9,6 +9,7 @@ pub enum Action {
     GoTop,
     GoBottom,
     ToggleHelp,
+    Enter,
     OpenComments,
     OpenInBrowser,
     BackOrQuit,
@@ -49,7 +50,7 @@ impl KeyState {
                     (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(Action::PageUp),
                     (KeyCode::Char('G'), KeyModifiers::SHIFT)
                     | (KeyCode::Char('G'), KeyModifiers::NONE) => Some(Action::GoBottom),
-                    (KeyCode::Enter, _) => Some(Action::OpenComments),
+                    (KeyCode::Enter, _) => Some(Action::Enter),
                     (KeyCode::Char(' '), KeyModifiers::NONE) => Some(Action::OpenComments),
                     (KeyCode::Char('o'), KeyModifiers::NONE) => Some(Action::OpenInBrowser),
                     (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, _) => {

@@ -510,6 +510,7 @@ impl App {
             (View::Stories, Action::Refresh) => self.refresh_stories(),
             (View::Comments, Action::Refresh) => self.refresh_comments(),
 
+            (View::Stories, Action::Enter) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
             (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenInBrowser) => {
@@ -614,6 +615,7 @@ impl App {
                     );
                 }
             }
+            (View::Comments, Action::Enter) => self.toggle_selected_comment_collapse(),
             (View::Comments, Action::Collapse) => self.collapse_selected_comment(),
             (View::Comments, Action::Expand) => self.expand_selected_comment(),
             (View::Comments, Action::ToggleCollapse) => self.toggle_selected_comment_collapse(),

@@ -25,6 +25,9 @@ pub struct HnClient {
     concurrency: usize,
 }
 
+const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 1;
+const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 4;
+
 impl HnClient {
     pub fn new(
         base_url: String,
@@ -139,7 +142,8 @@ impl HnClient {
         if story.kids.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_comment_nodes_shallow(&story.kids, 0).await
+        self.fetch_comment_nodes_prefetch(&story.kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
+            .await
     }
 
     pub async fn fetch_comment_children(
@@ -150,13 +154,15 @@ impl HnClient {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_comment_nodes_shallow(ids, depth).await
+        self.fetch_comment_nodes_prefetch(ids, depth, COMMENT_PREFETCH_EXTRA_DEPTH)
+            .await
     }
 
-    async fn fetch_comment_nodes_shallow(
+    async fn fetch_comment_nodes_prefetch(
         &self,
         ids: &[u64],
         depth: usize,
+        prefetch_extra_depth: usize,
     ) -> Result<Vec<CommentNode>> {
         let items = self.fetch_items_batch(ids).await?;
 
@@ -168,6 +174,39 @@ impl HnClient {
                 children: vec![],
             };
             nodes.push(node);
+        }
+
+        if prefetch_extra_depth == 0 {
+            return Ok(nodes);
+        }
+
+        let mut child_batches = Vec::new();
+        for (idx, node) in nodes.iter().enumerate() {
+            if node.comment.kids.is_empty() {
+                continue;
+            }
+            child_batches.push((idx, node.comment.kids.clone()));
+        }
+
+        if child_batches.is_empty() {
+            return Ok(nodes);
+        }
+
+        let child_concurrency = self.concurrency.min(COMMENT_PREFETCH_CHILD_CONCURRENCY);
+        let child_results = stream::iter(child_batches.into_iter())
+            .map(|(idx, kids)| async move {
+                let children = self
+                    .fetch_comment_nodes_prefetch(&kids, depth + 1, prefetch_extra_depth - 1)
+                    .await?;
+                Ok::<_, anyhow::Error>((idx, children))
+            })
+            .buffer_unordered(child_concurrency.max(1))
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        for (idx, children) in child_results {
+            nodes[idx].children = children;
+            nodes[idx].comment.children_loaded = true;
         }
 
         Ok(nodes)
