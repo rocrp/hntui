@@ -50,7 +50,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|comment| {
                 let indent = "│ ".repeat(comment.depth);
                 let indent_width = indent.chars().count();
-                let indent_style = Style::default().fg(theme::rainbow_depth(comment.depth));
+                let indent_style = Style::default().fg(theme::comment_indent_color(comment.depth));
                 let marker_style = indent_style.add_modifier(Modifier::BOLD);
 
                 let thread_marker = if comment.kids.is_empty() {

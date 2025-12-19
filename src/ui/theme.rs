@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 static THEME: OnceLock<Theme> = OnceLock::new();
 const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
+const COMMENT_INDENT_BLEND: f64 = 0.35;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Theme {
@@ -168,6 +169,11 @@ pub(crate) fn score_color(score: i64) -> Color {
 
 pub(crate) fn comment_color(comments: i64) -> Color {
     theme().comment_scale.color_for(comments)
+}
+
+pub(crate) fn comment_indent_color(depth: usize) -> Color {
+    let accent = rainbow_depth(depth);
+    blend(theme().palette.overlay0, accent, COMMENT_INDENT_BLEND)
 }
 
 pub(crate) fn score_level(score: i64) -> f64 {
