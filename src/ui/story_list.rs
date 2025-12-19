@@ -35,6 +35,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .areas(inner);
 
     app.story_page_size = (list_area.height as usize).max(1);
+    app.maybe_prefetch_stories();
 
     fn normalize_i64(value: i64, min: i64, max: i64) -> f64 {
         if max <= min {

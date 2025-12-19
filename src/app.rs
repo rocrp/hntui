@@ -282,7 +282,9 @@ impl App {
 
         let selected = self.story_list_state.selected().unwrap_or(0);
         let loaded = self.stories.len();
-        let should_prefetch = selected.saturating_mul(10) >= loaded.saturating_mul(8);
+        let should_fill_viewport = loaded < self.story_page_size;
+        let should_prefetch =
+            should_fill_viewport || selected.saturating_mul(10) >= loaded.saturating_mul(8);
         if !should_prefetch {
             return;
         }
