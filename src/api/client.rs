@@ -1,14 +1,15 @@
-use crate::api::file_cache::FileCache;
+use crate::api::file_cache::{CacheHit, FileCache};
 use crate::api::types::{Comment, CommentNode, HnItem, Story};
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use lru::LruCache;
 use reqwest::Client;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
+use std::time::{Duration, Instant};
+use tokio::sync::{broadcast, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct DiskCacheConfig {
@@ -23,10 +24,14 @@ pub struct HnClient {
     cache: Arc<Mutex<LruCache<u64, HnItem>>>,
     file_cache: Option<Arc<FileCache>>,
     concurrency: usize,
+    in_flight: Arc<Mutex<HashMap<u64, broadcast::Sender<Result<HnItem, String>>>>>,
+    story_ids_cache: Arc<Mutex<Option<(Vec<u64>, Instant)>>>,
 }
 
-const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 1;
-const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 4;
+const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 2;
+const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 8;
+const STORY_IDS_CACHE_TTL: Duration = Duration::from_secs(60);
+const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
 impl HnClient {
     pub fn new(
@@ -46,14 +51,43 @@ impl HnClient {
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            http: Client::new(),
+            http: Client::builder()
+                .pool_max_idle_per_host(10)
+                .pool_idle_timeout(Duration::from_secs(30))
+                .build()
+                .context("build http client")?,
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
             file_cache,
             concurrency,
+            in_flight: Arc::new(Mutex::new(HashMap::new())),
+            story_ids_cache: Arc::new(Mutex::new(None)),
         })
     }
 
     pub async fn fetch_top_story_ids(&self) -> Result<Vec<u64>> {
+        {
+            let cache = self.story_ids_cache.lock().await;
+            if let Some((ids, fetched_at)) = cache.as_ref() {
+                if fetched_at.elapsed() < STORY_IDS_CACHE_TTL {
+                    return Ok(ids.clone());
+                }
+            }
+        }
+
+        let ids = self.fetch_top_story_ids_network().await?;
+        let mut cache = self.story_ids_cache.lock().await;
+        *cache = Some((ids.clone(), Instant::now()));
+        Ok(ids)
+    }
+
+    pub async fn fetch_top_story_ids_force(&self) -> Result<Vec<u64>> {
+        let ids = self.fetch_top_story_ids_network().await?;
+        let mut cache = self.story_ids_cache.lock().await;
+        *cache = Some((ids.clone(), Instant::now()));
+        Ok(ids)
+    }
+
+    async fn fetch_top_story_ids_network(&self) -> Result<Vec<u64>> {
         let url = format!("{}/topstories.json", self.base_url);
         self.http
             .get(url)
@@ -74,6 +108,24 @@ impl HnClient {
         self.fetch_stories_batch(&ids).await
     }
 
+    pub fn cleanup_disk_cache_background(&self, max_age: Duration) {
+        let Some(file_cache) = self.file_cache.clone() else {
+            return;
+        };
+        tokio::spawn(async move {
+            match file_cache.cleanup_expired(max_age).await {
+                Ok(removed) => {
+                    if removed > 0 {
+                        eprintln!("hntui: cleaned {removed} expired cache entries");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("hntui: failed to cleanup cache: {err:#}");
+                }
+            }
+        });
+    }
+
     pub async fn fetch_item(&self, id: u64) -> Result<HnItem> {
         {
             let mut cache = self.cache.lock().await;
@@ -83,35 +135,26 @@ impl HnClient {
         }
 
         if let Some(file_cache) = &self.file_cache {
-            if let Some(item) = file_cache.get_item(id).await? {
-                let mut cache = self.cache.lock().await;
-                cache.put(id, item.clone());
-                return Ok(item);
+            if let Some(hit) = file_cache.get_item_with_staleness(id).await? {
+                match hit {
+                    CacheHit::Fresh(item) => {
+                        let mut cache = self.cache.lock().await;
+                        cache.put(id, item.clone());
+                        return Ok(item);
+                    }
+                    CacheHit::Stale { item, stale_secs } => {
+                        if stale_secs <= STALE_ITEM_MAX_AGE.as_secs() {
+                            let mut cache = self.cache.lock().await;
+                            cache.put(id, item.clone());
+                            self.spawn_revalidate_item(id);
+                            return Ok(item);
+                        }
+                    }
+                }
             }
         }
 
-        let url = format!("{}/item/{}.json", self.base_url, id);
-        let item = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .with_context(|| format!("fetch item id={id}"))?
-            .error_for_status()
-            .with_context(|| format!("item status id={id}"))?
-            .json::<Option<HnItem>>()
-            .await
-            .with_context(|| format!("decode item id={id}"))?
-            .ok_or_else(|| anyhow!("item missing (null) id={id}"))?;
-
-        let mut cache = self.cache.lock().await;
-        cache.put(id, item.clone());
-
-        if let Some(file_cache) = &self.file_cache {
-            file_cache.put_item(id, item.clone()).await?;
-        }
-
-        Ok(item)
+        self.fetch_item_network_deduped(id).await
     }
 
     pub async fn fetch_items_batch(&self, ids: &[u64]) -> Result<Vec<HnItem>> {
@@ -210,5 +253,67 @@ impl HnClient {
         }
 
         Ok(nodes)
+    }
+
+    async fn fetch_item_network_deduped(&self, id: u64) -> Result<HnItem> {
+        let mut rx = {
+            let mut in_flight = self.in_flight.lock().await;
+            if let Some(existing) = in_flight.get(&id) {
+                existing.subscribe()
+            } else {
+                let (tx, _rx) = broadcast::channel(1);
+                in_flight.insert(id, tx.clone());
+                drop(in_flight);
+                let result = self.fetch_item_network(id).await;
+                let send_result = match &result {
+                    Ok(item) => Ok(item.clone()),
+                    Err(err) => Err(format!("{err:#}")),
+                };
+                let _ = tx.send(send_result);
+                let mut in_flight = self.in_flight.lock().await;
+                in_flight.remove(&id);
+                return result;
+            }
+        };
+
+        match rx.recv().await {
+            Ok(Ok(item)) => Ok(item),
+            Ok(Err(message)) => Err(anyhow!(message)),
+            Err(err) => Err(anyhow!("in-flight request failed id={id}: {err}")),
+        }
+    }
+
+    async fn fetch_item_network(&self, id: u64) -> Result<HnItem> {
+        let url = format!("{}/item/{}.json", self.base_url, id);
+        let item = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .with_context(|| format!("fetch item id={id}"))?
+            .error_for_status()
+            .with_context(|| format!("item status id={id}"))?
+            .json::<Option<HnItem>>()
+            .await
+            .with_context(|| format!("decode item id={id}"))?
+            .ok_or_else(|| anyhow!("item missing (null) id={id}"))?;
+
+        let mut cache = self.cache.lock().await;
+        cache.put(id, item.clone());
+
+        if let Some(file_cache) = &self.file_cache {
+            file_cache.put_item(id, item.clone()).await?;
+        }
+
+        Ok(item)
+    }
+
+    fn spawn_revalidate_item(&self, id: u64) {
+        let client = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = client.fetch_item_network_deduped(id).await {
+                eprintln!("hntui: failed to revalidate item id={id}: {err:#}");
+            }
+        });
     }
 }

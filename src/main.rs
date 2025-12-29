@@ -21,7 +21,7 @@ pub struct Cli {
     pub page_size: usize,
 
     /// Max items kept in the in-memory LRU cache.
-    #[arg(long, default_value_t = 500)]
+    #[arg(long, default_value_t = 1000)]
     pub cache_size: usize,
 
     /// Max simultaneous HTTP requests.

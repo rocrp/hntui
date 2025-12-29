@@ -11,6 +11,12 @@ pub(crate) struct FileCache {
     ttl: Duration,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum CacheHit {
+    Fresh(HnItem),
+    Stale { item: HnItem, stale_secs: u64 },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedItem {
     fetched_at: i64,
@@ -26,7 +32,7 @@ impl FileCache {
         Ok(Self { items_dir, ttl })
     }
 
-    pub(crate) async fn get_item(&self, id: u64) -> Result<Option<HnItem>> {
+    pub(crate) async fn get_item_with_staleness(&self, id: u64) -> Result<Option<CacheHit>> {
         let path = self.item_path(id);
         let bytes = match fs::read(&path).await {
             Ok(bytes) => bytes,
@@ -39,11 +45,14 @@ impl FileCache {
         let cached: CachedItem = serde_json::from_slice(&bytes)
             .with_context(|| format!("decode cache {}", path.display()))?;
         let now = now_unix()?;
-        let age_secs = now.saturating_sub(cached.fetched_at).max(0);
-        if age_secs as u64 > self.ttl.as_secs() {
-            return Ok(None);
+        let age_secs = now.saturating_sub(cached.fetched_at).max(0) as u64;
+        if age_secs <= self.ttl.as_secs() {
+            return Ok(Some(CacheHit::Fresh(cached.item)));
         }
-        Ok(Some(cached.item))
+        Ok(Some(CacheHit::Stale {
+            item: cached.item,
+            stale_secs: age_secs,
+        }))
     }
 
     pub(crate) async fn put_item(&self, id: u64, item: HnItem) -> Result<()> {
@@ -59,6 +68,59 @@ impl FileCache {
 
     fn item_path(&self, id: u64) -> PathBuf {
         self.items_dir.join(format!("{id}.json"))
+    }
+
+    pub(crate) async fn cleanup_expired(&self, max_age: Duration) -> Result<usize> {
+        anyhow::ensure!(max_age.as_secs() > 0, "max_age must be > 0s");
+        let mut removed = 0usize;
+        let now = now_unix()?;
+        let mut entries = fs::read_dir(&self.items_dir)
+            .await
+            .with_context(|| format!("read cache dir {}", self.items_dir.display()))?;
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .context("read cache dir entry")?
+        {
+            let path = entry.path();
+            let file_type = entry.file_type().await.with_context(|| {
+                format!("stat cache entry {}", path.display())
+            })?;
+            if !file_type.is_file() {
+                return Err(anyhow::anyhow!(
+                    "unexpected non-file in cache dir {}",
+                    path.display()
+                ));
+            }
+
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .context("cache entry name not utf-8")?;
+            if !file_name.ends_with(".json") {
+                fs::remove_file(&path)
+                    .await
+                    .with_context(|| format!("remove stray cache file {}", path.display()))?;
+                removed += 1;
+                continue;
+            }
+
+            let bytes = fs::read(&path)
+                .await
+                .with_context(|| format!("read cache {}", path.display()))?;
+            let cached: CachedItem = serde_json::from_slice(&bytes)
+                .with_context(|| format!("decode cache {}", path.display()))?;
+            let age_secs = now.saturating_sub(cached.fetched_at).max(0) as u64;
+            if age_secs > max_age.as_secs() {
+                fs::remove_file(&path)
+                    .await
+                    .with_context(|| format!("remove expired cache {}", path.display()))?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
     }
 }
 

@@ -11,7 +11,7 @@ use futures::StreamExt;
 use ratatui::widgets::ListState;
 use std::cmp;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,11 +64,9 @@ pub enum StoriesLoadMode {
     Append,
 }
 
-#[derive(Debug)]
-struct PrefetchedComments {
-    story_id: u64,
-    comments: Vec<CommentNode>,
-}
+const IDLE_PREFETCH_DELAY: Duration = Duration::from_millis(500);
+const PREFETCH_RANGE_BEHIND: usize = 2;
+const PREFETCH_RANGE_AHEAD: usize = 5;
 
 pub struct App {
     pub view: View,
@@ -102,11 +100,12 @@ pub struct App {
     pub prefetch_in_flight: bool,
     pub comment_prefetch_in_flight: bool,
     comment_prefetch_story_id: Option<u64>,
-    prefetched_comments: Option<PrefetchedComments>,
+    prefetched_comments_cache: HashMap<u64, Vec<CommentNode>>,
     awaiting_prefetch_story_id: Option<u64>,
     input: KeyState,
     should_quit: bool,
     spinner_idx: usize,
+    last_user_activity: Instant,
 
     pending_story_selection_id: Option<u64>,
 
@@ -159,11 +158,12 @@ impl App {
             prefetch_in_flight: false,
             comment_prefetch_in_flight: false,
             comment_prefetch_story_id: None,
-            prefetched_comments: None,
+            prefetched_comments_cache: HashMap::new(),
             awaiting_prefetch_story_id: None,
             input: KeyState::default(),
             should_quit: false,
             spinner_idx: 0,
+            last_user_activity: Instant::now(),
 
             pending_story_selection_id: None,
 
@@ -181,6 +181,7 @@ impl App {
         if self.is_busy() {
             self.spinner_idx = self.spinner_idx.wrapping_add(1);
         }
+        self.maybe_prefetch_comments();
     }
 
     fn is_busy(&self) -> bool {
@@ -254,7 +255,7 @@ impl App {
         let count = self.cli.count;
         tokio::spawn(async move {
             let res = async {
-                let story_ids = client.fetch_top_story_ids().await?;
+                let story_ids = client.fetch_top_story_ids_force().await?;
                 let ids = story_ids.iter().copied().take(count).collect::<Vec<_>>();
                 let stories = client.fetch_stories_batch(&ids).await?;
                 Ok::<_, anyhow::Error>((story_ids, stories))
@@ -348,25 +349,13 @@ impl App {
         if self.story_loading && self.stories.is_empty() {
             return;
         }
-        let Some(story) = self.selected_story().cloned() else {
+        if !self.is_idle_for_prefetch() {
+            return;
+        }
+
+        let Some(story) = self.next_prefetch_story() else {
             return;
         };
-        if story.kids.is_empty() {
-            return;
-        }
-        if self
-            .prefetched_comments
-            .as_ref()
-            .is_some_and(|p| p.story_id == story.id)
-        {
-            return;
-        }
-        if self
-            .comment_prefetch_story_id
-            .is_some_and(|id| id == story.id)
-        {
-            return;
-        }
 
         self.comments_prefetch_generation = self.comments_prefetch_generation.wrapping_add(1);
         let generation = self.comments_prefetch_generation;
@@ -407,22 +396,13 @@ impl App {
             .as_ref()
             .is_some_and(|s| s.id == story.id)
             && !self.comment_tree.is_empty()
-            && !self.comment_loading
         {
             self.view = View::Comments;
             return;
         }
 
-        if self
-            .prefetched_comments
-            .as_ref()
-            .is_some_and(|p| p.story_id == story.id)
-        {
-            let prefetched = self
-                .prefetched_comments
-                .take()
-                .expect("prefetched comments present");
-            self.apply_comments_for_story(story, prefetched.comments, true);
+        if let Some(comments) = self.prefetched_comments_cache.remove(&story.id) {
+            self.apply_comments_for_story(story, comments, true);
             return;
         }
 
@@ -433,15 +413,15 @@ impl App {
             self.awaiting_prefetch_story_id = Some(story.id);
             self.view = View::Comments;
             self.last_error = None;
+            let is_same_story = self
+                .current_story
+                .as_ref()
+                .is_some_and(|current| current.id == story.id);
             self.current_story = Some(story);
             self.comment_loading = true;
-            self.comment_tree.clear();
-            self.comment_children_in_flight.clear();
-            self.comment_list.clear();
-            self.comment_item_heights.clear();
-            self.comment_line_offset = 0;
-            self.comment_list_state.select(Some(0));
-            *self.comment_list_state.offset_mut() = 0;
+            if !is_same_story {
+                self.reset_comment_state();
+            }
             return;
         }
 
@@ -458,15 +438,15 @@ impl App {
         }
 
         self.last_error = None;
+        let is_same_story = self
+            .current_story
+            .as_ref()
+            .is_some_and(|current| current.id == story.id);
         self.current_story = Some(story.clone());
         self.comment_loading = true;
-        self.comment_tree.clear();
-        self.comment_children_in_flight.clear();
-        self.comment_list.clear();
-        self.comment_item_heights.clear();
-        self.comment_line_offset = 0;
-        self.comment_list_state.select(Some(0));
-        *self.comment_list_state.offset_mut() = 0;
+        if !is_same_story {
+            self.reset_comment_state();
+        }
 
         let story_id = story.id;
         let client = self.client.clone();
@@ -685,6 +665,7 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return;
         }
+        self.last_user_activity = Instant::now();
         if let Some(action) = self.input.on_key(key) {
             self.handle_action(action);
         }
@@ -712,6 +693,7 @@ impl App {
                 match mode {
                     StoriesLoadMode::Replace => {
                         self.stories = stories;
+                        self.prefetched_comments_cache.clear();
                         let select_idx = self
                             .pending_story_selection_id
                             .take()
@@ -779,7 +761,7 @@ impl App {
                     return;
                 }
 
-                self.prefetched_comments = Some(PrefetchedComments { story_id, comments });
+                self.prefetched_comments_cache.insert(story_id, comments);
                 self.maybe_prefetch_comments();
             }
             AppEvent::CommentChildrenLoaded {
@@ -867,6 +849,63 @@ impl App {
     pub fn selected_story(&self) -> Option<&Story> {
         let idx = self.story_list_state.selected().unwrap_or(0);
         self.stories.get(idx)
+    }
+
+    fn reset_comment_state(&mut self) {
+        self.comment_tree.clear();
+        self.comment_children_in_flight.clear();
+        self.comment_list.clear();
+        self.comment_item_heights.clear();
+        self.comment_line_offset = 0;
+        self.comment_list_state.select(Some(0));
+        *self.comment_list_state.offset_mut() = 0;
+    }
+
+    fn is_idle_for_prefetch(&self) -> bool {
+        self.last_user_activity.elapsed() >= IDLE_PREFETCH_DELAY
+    }
+
+    fn next_prefetch_story(&self) -> Option<Story> {
+        let len = self.stories.len();
+        if len == 0 {
+            return None;
+        }
+        let selected = self.story_list_state.selected().unwrap_or(0);
+        let mut candidates = Vec::new();
+
+        for offset in 0..=PREFETCH_RANGE_AHEAD {
+            let idx = selected + offset;
+            if idx < len {
+                candidates.push(idx);
+            }
+        }
+        for offset in 1..=PREFETCH_RANGE_BEHIND {
+            let idx = selected.saturating_sub(offset);
+            if !candidates.contains(&idx) {
+                candidates.push(idx);
+            }
+        }
+
+        for idx in candidates {
+            let Some(story) = self.stories.get(idx) else {
+                continue;
+            };
+            if story.kids.is_empty() {
+                continue;
+            }
+            if self.prefetched_comments_cache.contains_key(&story.id) {
+                continue;
+            }
+            if self
+                .comment_prefetch_story_id
+                .is_some_and(|id| id == story.id)
+            {
+                continue;
+            }
+            return Some(story.clone());
+        }
+
+        None
     }
 
     fn open_selected_story_in_browser(&self) -> Result<()> {
@@ -1441,6 +1480,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         cli.concurrency,
         disk_cache,
     )?;
+    client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(cli, client, tx.clone(), state_store.clone());
@@ -1462,7 +1502,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         let tick_duration = if app.is_busy() {
             Duration::from_millis(120)
         } else {
-            Duration::from_secs(3600)
+            Duration::from_millis(200)
         };
 
         tokio::select! {
