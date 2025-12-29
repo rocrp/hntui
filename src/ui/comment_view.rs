@@ -33,102 +33,169 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let layout = theme::layout();
     let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
-    let comment_page_hint = layout.comment_max_lines.unwrap_or(1).max(1);
-    app.comment_page_size = (list_area.height as usize)
-        .saturating_div(comment_page_hint)
-        .max(1);
     let content_width = list_area.width as usize;
 
-    let items = if app.comment_loading && app.comment_list.is_empty() {
-        vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
+    let highlight_style = Style::default()
+        .bg(theme::palette().surface2)
+        .add_modifier(Modifier::BOLD);
+
+    if app.comment_loading && app.comment_list.is_empty() {
+        app.comment_item_heights.clear();
+        app.comment_line_offset = 0;
+        app.comment_viewport_height = list_area.height as usize;
+        app.comment_page_size = app.comment_viewport_height.max(1);
+
+        let items = vec![ListItem::new(Line::from(format!("Loading {spinner}")))];
+        let list = List::new(items)
+            .highlight_symbol("")
+            .highlight_style(highlight_style);
+        frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
     } else if app.comment_list.is_empty() {
-        vec![ListItem::new(Line::from("No comments."))]
+        app.comment_item_heights.clear();
+        app.comment_line_offset = 0;
+        app.comment_viewport_height = list_area.height as usize;
+        app.comment_page_size = app.comment_viewport_height.max(1);
+
+        let items = vec![ListItem::new(Line::from("No comments."))];
+        let list = List::new(items)
+            .highlight_symbol("")
+            .highlight_style(highlight_style);
+        frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
     } else {
         let now = now_unix();
-        app.comment_list
-            .iter()
-            .map(|comment| {
-                let indent = "│ ".repeat(comment.depth);
-                let indent_width = indent.chars().count();
-                let indent_style = Style::default().fg(theme::comment_indent_color(comment.depth));
-                let marker_style = indent_style.add_modifier(Modifier::BOLD);
+        let mut comment_lines = Vec::with_capacity(app.comment_list.len());
 
-                let thread_marker = if comment.kids.is_empty() {
-                    ' '
-                } else if comment.collapsed {
-                    '▸'
-                } else if comment.children_loading {
-                    spinner
-                } else {
-                    '▾'
-                };
+        for comment in &app.comment_list {
+            let indent = "│ ".repeat(comment.depth);
+            let indent_width = indent.chars().count();
+            let indent_style = Style::default().fg(theme::comment_indent_color(comment.depth));
+            let marker_style = indent_style.add_modifier(Modifier::BOLD);
 
-                let by = comment.by.as_deref().unwrap_or(if comment.deleted {
+            let thread_marker = if comment.kids.is_empty() {
+                ' '
+            } else if comment.collapsed {
+                '▸'
+            } else if comment.children_loading {
+                spinner
+            } else {
+                '▾'
+            };
+
+            let by = comment
+                .by
+                .as_deref()
+                .unwrap_or(if comment.deleted {
                     "[deleted]"
                 } else {
                     "[unknown]"
-                });
-                let age = comment
-                    .time
-                    .map(|t| format_age(t, now))
-                    .unwrap_or_else(|| "?".to_string());
+                })
+                .to_string();
+            let age = comment
+                .time
+                .map(|t| format_age(t, now))
+                .unwrap_or_else(|| "?".to_string());
 
-                let author_style = Style::default()
-                    .fg(theme::palette().subtext0)
-                    .add_modifier(Modifier::ITALIC);
-                let content_style = Style::default().fg(theme::palette().text);
-                let tail_style = Style::default().fg(theme::palette().overlay0);
+            let author_style = Style::default()
+                .fg(theme::palette().subtext0)
+                .add_modifier(Modifier::ITALIC);
+            let content_style = Style::default().fg(theme::palette().text);
+            let tail_style = Style::default().fg(theme::palette().overlay0);
 
-                let tail = if comment.dead && !comment.deleted {
-                    format!(" [dead] | {age}")
-                } else {
-                    format!(" | {age}")
-                };
-                let tail_width = tail.chars().count();
+            let tail = if comment.dead && !comment.deleted {
+                format!(" [dead] | {age}")
+            } else {
+                format!(" | {age}")
+            };
+            let tail_width = tail.chars().count();
 
-                let prefix_width = indent_width + 2 + by.chars().count() + 2;
-                let first_width = content_width
-                    .saturating_sub(prefix_width)
-                    .saturating_sub(tail_width);
-                let next_width = content_width
-                    .saturating_sub(indent_width)
-                    .saturating_sub(2)
-                    .max(1);
+            let prefix_width = indent_width + 2 + by.chars().count() + 2;
+            let first_width = content_width
+                .saturating_sub(prefix_width)
+                .saturating_sub(tail_width);
+            let next_width = content_width
+                .saturating_sub(indent_width)
+                .saturating_sub(2)
+                .max(1);
 
-                let plain = hn_html_to_plain(&comment.text);
-                let wrapped =
-                    wrap_plain(&plain, first_width.max(1), next_width, comment_max_lines);
-                let header_content = wrapped.first().cloned().unwrap_or_default();
+            let plain = hn_html_to_plain(&comment.text);
+            let wrapped = wrap_plain(&plain, first_width.max(1), next_width, comment_max_lines);
+            let header_content = wrapped.first().cloned().unwrap_or_default();
 
-                let mut lines = Vec::with_capacity(wrapped.len());
+            let mut lines = Vec::with_capacity(wrapped.len());
+            lines.push(Line::from(vec![
+                Span::styled(indent.clone(), indent_style),
+                Span::styled(format!("{thread_marker} "), marker_style),
+                Span::styled(by, author_style),
+                Span::raw(": "),
+                Span::styled(header_content, content_style),
+                Span::styled(tail, tail_style),
+            ]));
+
+            for line in wrapped.into_iter().skip(1) {
                 lines.push(Line::from(vec![
                     Span::styled(indent.clone(), indent_style),
-                    Span::styled(format!("{thread_marker} "), marker_style),
-                    Span::styled(by, author_style),
-                    Span::raw(": "),
-                    Span::styled(header_content, content_style),
-                    Span::styled(tail, tail_style),
+                    Span::raw("  "),
+                    Span::styled(line, content_style),
                 ]));
+            }
 
-                for line in wrapped.into_iter().skip(1) {
-                    lines.push(Line::from(vec![
-                        Span::styled(indent.clone(), indent_style),
-                        Span::raw("  "),
-                        Span::styled(line, content_style),
-                    ]));
+            if lines.is_empty() {
+                lines.push(Line::from(""));
+            }
+
+            comment_lines.push(lines);
+        }
+
+        app.comment_item_heights = comment_lines
+            .iter()
+            .map(|lines| lines.len().max(1))
+            .collect();
+
+        app.comment_viewport_height = list_area.height as usize;
+        let total_lines: usize = app.comment_item_heights.iter().sum();
+        let avg_height = if app.comment_item_heights.is_empty() {
+            1
+        } else {
+            (total_lines / app.comment_item_heights.len()).max(1)
+        };
+        let viewport_height = app.comment_viewport_height.max(1);
+        app.comment_page_size = (viewport_height / avg_height).max(1);
+
+        if app.comment_list_state.selected().is_none() {
+            app.comment_list_state.select(Some(0));
+        }
+        app.ensure_comment_line_offset();
+
+        let max_offset = total_lines.saturating_sub(viewport_height);
+        app.comment_line_offset = app.comment_line_offset.min(max_offset);
+        let start = app.comment_line_offset;
+        let end = (start + viewport_height).min(total_lines);
+
+        let selected = app.comment_list_state.selected().unwrap_or(0);
+        let mut visible_lines = Vec::with_capacity(end.saturating_sub(start));
+        let mut line_idx = 0usize;
+        'outer: for (idx, lines) in comment_lines.iter().enumerate() {
+            for line in lines {
+                if line_idx >= start && line_idx < end {
+                    let mut line = line.clone();
+                    if idx == selected {
+                        line = line.patch_style(highlight_style);
+                    }
+                    visible_lines.push(line);
                 }
+                line_idx += 1;
+                if line_idx >= end {
+                    break 'outer;
+                }
+            }
+        }
 
-                ListItem::new(lines)
-            })
-            .collect::<Vec<_>>()
-    };
+        if visible_lines.is_empty() {
+            visible_lines.push(Line::from(""));
+        }
 
-    let list = List::new(items).highlight_symbol("").highlight_style(
-        Style::default()
-            .bg(theme::palette().surface2)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
+        frame.render_widget(Paragraph::new(visible_lines), list_area);
+    }
 
     let footer_block = Block::default().borders(Borders::TOP);
     let footer_inner = footer_block.inner(footer_area);
