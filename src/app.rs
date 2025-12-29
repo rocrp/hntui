@@ -851,6 +851,11 @@ impl App {
         self.stories.get(idx)
     }
 
+    pub fn is_comment_prefetching_for_story(&self, story_id: u64) -> bool {
+        self.comment_prefetch_story_id
+            .is_some_and(|id| id == story_id)
+    }
+
     fn reset_comment_state(&mut self) {
         self.comment_tree.clear();
         self.comment_children_in_flight.clear();

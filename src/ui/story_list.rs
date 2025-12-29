@@ -96,8 +96,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let comment_style = Style::default()
                     .fg(theme::comment_color(story.comment_count))
                     .add_modifier(Modifier::BOLD);
+                let prefetching = app.is_comment_prefetching_for_story(story.id);
 
-                ListItem::new(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(
                         format!("{:>2}. ", idx + 1),
                         Style::default().fg(theme::palette().subtext1),
@@ -113,7 +114,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     Span::styled(format!("{}", story.score), score_style),
                     Span::styled("·", Style::default().fg(theme::palette().overlay0)),
                     Span::styled(format!("{}", story.comment_count), comment_style),
-                ]))
+                ];
+
+                if prefetching {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        spinner.to_string(),
+                        Style::default()
+                            .fg(theme::palette().subtext0)
+                            .add_modifier(Modifier::DIM),
+                    ));
+                }
+
+                ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>()
     };
