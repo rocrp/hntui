@@ -383,11 +383,11 @@ pub(crate) fn story_gradient_fg(
     let hue_pos = (row_index as f64 * 0.1) % 1.0;
     let rainbow_color = rainbow(hue_pos);
 
-    // Wider saturation range: 10% to 95% (low importance = muted, high = vibrant)
-    let saturation = 0.1 + (importance * 0.85);
+    // Saturation range: 20% to 95% (low importance = less rainbow, high = vibrant)
+    let saturation = 0.2 + (importance * 0.75);
 
-    // Base color varies with importance: low = dim overlay0, high = brighter subtext0
-    let base_color = blend(palette().overlay0, palette().subtext0, importance);
+    // Use subtext0 as base (brighter), importance affects saturation not base
+    let base_color = palette().subtext0;
 
     // Blend base with rainbow based on saturation
     let importance_adjusted = blend(base_color, rainbow_color, saturation);
@@ -399,9 +399,10 @@ pub(crate) fn story_gradient_fg(
     let max_dist = half_viewport.max(1) as f64;
     let fade = (distance as f64 / max_dist).min(1.0);
 
-    // More aggressive dimming for low importance stories
-    let dim_factor = fade * (0.7 - importance * 0.5);
-    blend(importance_adjusted, palette().overlay0, dim_factor)
+    // Dim based on distance, high importance dims less (like comments)
+    // Use subtext0 as fade target (brighter than overlay0)
+    let dim_factor = fade * (0.5 - importance * 0.2);
+    blend(importance_adjusted, palette().subtext0, dim_factor)
 }
 
 pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
