@@ -202,7 +202,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         } else {
                             0
                         };
-                        if let Some(fg) = theme::focus_gradient_fg(dist, half_viewport) {
+                        if let Some(fg) = theme::focus_gradient_fg(line_idx, dist, half_viewport) {
                             // Override each span's foreground color
                             line = Line::from(
                                 line.spans
