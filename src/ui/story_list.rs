@@ -51,6 +51,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
     }
 
+    let selected = app.story_list_state.selected().unwrap_or(0);
+    let half_viewport = (app.story_page_size / 2).max(1);
+
     let items = if app.story_loading && app.stories.is_empty() {
         vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
     } else if app.stories.is_empty() {
@@ -69,60 +72,46 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     .unwrap_or_else(|| "self".to_string());
                 let title = decode_html_entities(&story.title);
 
+                // Calculate importance from score + comments
                 let score_level = theme::score_level(story.score);
                 let comment_level = theme::comment_level(story.comment_count);
-                let weighted =
-                    ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
+                let weighted = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
                 let importance = bucket_importance(weighted);
 
-                let accent = theme::rainbow(importance);
-                let color_t = importance.powf(1.3);
-                let base_t = importance.powf(0.9).clamp(0.0, 1.0);
-                let title_base =
-                    theme::blend(theme::palette().overlay0, theme::palette().text, base_t);
-                let title_color = theme::blend(title_base, accent, color_t);
-                let mut title_style = Style::default().fg(title_color);
+                // Calculate distance from selected row
+                let distance = idx.abs_diff(selected);
+
+                // Get gradient color based on position, importance, and focus distance
+                let fg = theme::story_gradient_fg(idx, importance, distance, half_viewport);
+
+                // Style modifiers based on importance
+                let mut base_style = Style::default().fg(fg);
                 if importance >= 0.9 {
-                    title_style = title_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                    base_style = base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                 } else if importance >= 0.75 {
-                    title_style = title_style.add_modifier(Modifier::BOLD);
-                } else if importance <= 0.25 {
-                    title_style = title_style.add_modifier(Modifier::DIM);
+                    base_style = base_style.add_modifier(Modifier::BOLD);
                 }
 
-                let score_style = Style::default()
-                    .fg(theme::score_color(story.score))
-                    .add_modifier(Modifier::BOLD);
-                let comment_style = Style::default()
-                    .fg(theme::comment_color(story.comment_count))
-                    .add_modifier(Modifier::BOLD);
                 let prefetching = app.is_comment_prefetching_for_story(story.id);
 
                 let mut spans = vec![
-                    Span::styled(
-                        format!("{:>2}. ", idx + 1),
-                        Style::default().fg(theme::palette().subtext1),
-                    ),
-                    Span::styled(title, title_style),
+                    Span::styled(format!("{:>2}. ", idx + 1), base_style),
+                    Span::styled(title, base_style),
                     Span::styled(
                         format!(" ({domain})"),
-                        Style::default()
-                            .fg(theme::palette().overlay0)
-                            .add_modifier(Modifier::ITALIC | Modifier::DIM),
+                        base_style.add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("  "),
-                    Span::styled(format!("{}", story.score), score_style),
-                    Span::styled("·", Style::default().fg(theme::palette().overlay0)),
-                    Span::styled(format!("{}", story.comment_count), comment_style),
+                    Span::styled(format!("{}", story.score), base_style),
+                    Span::styled("·", base_style),
+                    Span::styled(format!("{}", story.comment_count), base_style),
                 ];
 
                 if prefetching {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
                         spinner.to_string(),
-                        Style::default()
-                            .fg(theme::palette().subtext0)
-                            .add_modifier(Modifier::DIM),
+                        base_style.add_modifier(Modifier::DIM),
                     ));
                 }
 
@@ -160,7 +149,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut spans = vec![
             Span::styled(format!("{} pts", story.score), score_style),
             Span::raw(format!(" by {} ", story.by)),
-            Span::styled(format!("{age}"), Style::default().fg(theme::palette().subtext0)),
+            Span::styled(
+                format!("{age}"),
+                Style::default().fg(theme::palette().subtext0),
+            ),
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];

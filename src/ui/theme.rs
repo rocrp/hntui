@@ -369,6 +369,41 @@ pub(crate) fn focus_gradient_fg(
     Some(dimmed)
 }
 
+/// Returns foreground color for story based on row position, importance, and focus distance.
+/// - row_index: determines rainbow hue (stable)
+/// - importance: 0.0-1.0 from score/comments (higher = brighter/more saturated)
+/// - distance: from focus (0 = selected, higher = dimmer)
+pub(crate) fn story_gradient_fg(
+    row_index: usize,
+    importance: f64,
+    distance: usize,
+    half_viewport: usize,
+) -> Color {
+    // Stable rainbow hue based on row position
+    let hue_pos = (row_index as f64 * 0.1) % 1.0;
+    let rainbow_color = rainbow(hue_pos);
+
+    // Wider saturation range: 10% to 95% (low importance = muted, high = vibrant)
+    let saturation = 0.1 + (importance * 0.85);
+
+    // Base color varies with importance: low = dim overlay0, high = brighter subtext0
+    let base_color = blend(palette().overlay0, palette().subtext0, importance);
+
+    // Blend base with rainbow based on saturation
+    let importance_adjusted = blend(base_color, rainbow_color, saturation);
+
+    if distance == 0 {
+        return importance_adjusted;
+    }
+
+    let max_dist = half_viewport.max(1) as f64;
+    let fade = (distance as f64 / max_dist).min(1.0);
+
+    // More aggressive dimming for low importance stories
+    let dim_factor = fade * (0.7 - importance * 0.5);
+    blend(importance_adjusted, palette().overlay0, dim_factor)
+}
+
 pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
     let (ar, ag, ab) = rgb_components(a);
     let (br, bg, bb) = rgb_components(b);
