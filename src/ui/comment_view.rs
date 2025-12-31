@@ -151,6 +151,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|lines| lines.len().max(1))
             .collect();
 
+        // Build cumulative line starts for gradient calculation
+        let mut line_starts = Vec::with_capacity(app.comment_item_heights.len() + 1);
+        line_starts.push(0usize);
+        let mut cumsum = 0usize;
+        for &h in &app.comment_item_heights {
+            cumsum += h;
+            line_starts.push(cumsum);
+        }
+
         app.comment_viewport_height = list_area.height as usize;
         let total_lines: usize = app.comment_item_heights.iter().sum();
         let avg_height = if app.comment_item_heights.is_empty() {
@@ -172,6 +181,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let end = (start + viewport_height).min(total_lines);
 
         let selected = app.comment_list_state.selected().unwrap_or(0);
+        let sel_start = line_starts.get(selected).copied().unwrap_or(0);
+        let sel_end = line_starts.get(selected + 1).copied().unwrap_or(sel_start);
+        let half_viewport = viewport_height / 2;
+
         let mut visible_lines = Vec::with_capacity(end.saturating_sub(start));
         let mut line_idx = 0usize;
         'outer: for (idx, lines) in comment_lines.iter().enumerate() {
@@ -180,6 +193,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     let mut line = line.clone();
                     if idx == selected {
                         line = line.patch_style(highlight_style);
+                    } else {
+                        // Rainbow gradient based on distance from selected comment
+                        let dist = if line_idx < sel_start {
+                            sel_start - line_idx
+                        } else if line_idx >= sel_end {
+                            line_idx - sel_end + 1
+                        } else {
+                            0
+                        };
+                        if let Some(fg) = theme::focus_gradient_fg(dist, half_viewport) {
+                            // Override each span's foreground color
+                            line = Line::from(
+                                line.spans
+                                    .into_iter()
+                                    .map(|span| {
+                                        let new_style = span.style.fg(fg);
+                                        Span::styled(span.content, new_style)
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
+                        }
                     }
                     visible_lines.push(line);
                 }

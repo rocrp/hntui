@@ -109,7 +109,10 @@ pub(crate) fn init_from_candidates(
     paths: &[PathBuf],
     allow_default: bool,
 ) -> Result<Option<PathBuf>> {
-    ensure!(!paths.is_empty(), "ui config search paths must be non-empty");
+    ensure!(
+        !paths.is_empty(),
+        "ui config search paths must be non-empty"
+    );
     for path in paths {
         if !path.exists() {
             continue;
@@ -132,8 +135,8 @@ pub(crate) fn init_from_candidates(
 }
 
 fn init_from_path(path: &Path) -> Result<()> {
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("read ui config {}", path.display()))?;
+    let contents =
+        fs::read_to_string(path).with_context(|| format!("read ui config {}", path.display()))?;
     init_from_str(&format!("ui config {}", path.display()), &contents)
 }
 
@@ -252,25 +255,18 @@ impl Palette {
 
 impl Scale {
     fn from_config(label: &str, config: ScaleConfig) -> Result<Self> {
-        ensure!(
-            !config.steps.is_empty(),
-            "{label}.steps must be non-empty"
-        );
+        ensure!(!config.steps.is_empty(), "{label}.steps must be non-empty");
         let mut steps = Vec::with_capacity(config.steps.len());
         let mut prev_min: Option<i64> = None;
         for (idx, step) in config.steps.into_iter().enumerate() {
-            ensure!(
-                step.min >= 0,
-                "{label}.steps[{idx}].min must be >= 0"
-            );
+            ensure!(step.min >= 0, "{label}.steps[{idx}].min must be >= 0");
             if let Some(prev) = prev_min {
                 ensure!(
                     step.min < prev,
                     "{label}.steps[{idx}].min must be < previous min {prev}"
                 );
             }
-            let color =
-                parse_hex_color(&format!("{label}.steps[{idx}].color"), &step.color)?;
+            let color = parse_hex_color(&format!("{label}.steps[{idx}].color"), &step.color)?;
             steps.push(ScaleStep {
                 min: step.min,
                 color,
@@ -319,10 +315,7 @@ fn parse_color_list(label: &str, values: &[String]) -> Result<Vec<Color>> {
 fn parse_hex_color(label: &str, value: &str) -> Result<Color> {
     let hex = value.trim();
     let hex = hex.strip_prefix('#').unwrap_or(hex);
-    ensure!(
-        hex.len() == 6,
-        "{label} must be 6-digit hex (got {value})"
-    );
+    ensure!(hex.len() == 6, "{label} must be 6-digit hex (got {value})");
     let r = u8::from_str_radix(&hex[0..2], 16)
         .with_context(|| format!("{label} invalid red channel {value}"))?;
     let g = u8::from_str_radix(&hex[2..4], 16)
@@ -349,6 +342,29 @@ pub(crate) fn rainbow_depth(depth: usize) -> Color {
     let colors = &theme().palette.rainbow;
     let idx = (depth.saturating_mul(3)) % colors.len();
     colors[idx]
+}
+
+/// Returns foreground color for comment based on distance from focus.
+/// distance=0 means focused (returns None, caller uses highlight_style).
+/// Larger distances shift through rainbow and dim toward subtext0 (readable on dark bg).
+pub(crate) fn focus_gradient_fg(distance: usize, half_viewport: usize) -> Option<Color> {
+    if distance == 0 {
+        return None;
+    }
+
+    let max_dist = half_viewport.max(1) as f64;
+    let dist = distance as f64;
+
+    // Rainbow position: shift hue with distance (wrap around)
+    let hue_pos = (dist * 0.12) % 1.0;
+    let rainbow_color = rainbow(hue_pos);
+
+    // Fade factor: 0.0 = close to focus, 1.0 = far away
+    let fade = (dist / max_dist).min(1.0);
+
+    // Blend toward subtext0 (brighter than overlay0) for dark-mode readability
+    let dimmed = blend(rainbow_color, palette().subtext0, fade * 0.4);
+    Some(dimmed)
 }
 
 pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
