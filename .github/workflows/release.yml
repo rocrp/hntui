@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  release-macos-arm64:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: |
+          set -euo pipefail
+          cargo build --release --target aarch64-apple-darwin
+      - name: package
+        run: |
+          set -euo pipefail
+          bin="hntui"
+          target="aarch64-apple-darwin"
+          version="${GITHUB_REF_NAME}"
+          out="${bin}-${version}-macos-arm64"
+          mkdir -p dist
+          cp "target/${target}/release/${bin}" "dist/${bin}"
+          (cd dist && tar -czf "../${out}.tar.gz" "${bin}")
+          rm -f "dist/${bin}"
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            hntui-*.tar.gz
