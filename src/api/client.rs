@@ -10,7 +10,7 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, Mutex, Semaphore};
 
 #[derive(Debug, Clone)]
 pub struct DiskCacheConfig {
@@ -25,12 +25,14 @@ pub struct HnClient {
     cache: Arc<Mutex<LruCache<u64, HnItem>>>,
     file_cache: Option<Arc<FileCache>>,
     concurrency: usize,
+    revalidate_semaphore: Arc<Semaphore>,
     in_flight: Arc<Mutex<HashMap<u64, broadcast::Sender<Result<HnItem, String>>>>>,
     story_ids_cache: Arc<Mutex<Option<(Vec<u64>, Instant)>>>,
 }
 
 const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 2;
 const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 8;
+const REVALIDATE_CONCURRENCY: usize = 4;
 const STORY_IDS_CACHE_TTL: Duration = Duration::from_secs(60);
 const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -60,6 +62,7 @@ impl HnClient {
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
             file_cache,
             concurrency,
+            revalidate_semaphore: Arc::new(Semaphore::new(REVALIDATE_CONCURRENCY)),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             story_ids_cache: Arc::new(Mutex::new(None)),
         })
@@ -311,7 +314,12 @@ impl HnClient {
 
     fn spawn_revalidate_item(&self, id: u64) {
         let client = self.clone();
+        let semaphore = self.revalidate_semaphore.clone();
         tokio::spawn(async move {
+            let _permit = match semaphore.try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(_) => return,
+            };
             if let Err(err) = client.fetch_item_network_deduped(id).await {
                 logging::log_error(format!("failed to revalidate item id={id}: {err:#}"));
             }
