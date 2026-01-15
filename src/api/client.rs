@@ -1,5 +1,6 @@
 use crate::api::file_cache::{CacheHit, FileCache};
 use crate::api::types::{Comment, CommentNode, HnItem, Story};
+use crate::logging;
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use lru::LruCache;
@@ -116,11 +117,11 @@ impl HnClient {
             match file_cache.cleanup_expired(max_age).await {
                 Ok(removed) => {
                     if removed > 0 {
-                        eprintln!("hntui: cleaned {removed} expired cache entries");
+                        logging::log_info(format!("cleaned {removed} expired cache entries"));
                     }
                 }
                 Err(err) => {
-                    eprintln!("hntui: failed to cleanup cache: {err:#}");
+                    logging::log_error(format!("failed to cleanup cache: {err:#}"));
                 }
             }
         });
@@ -312,7 +313,7 @@ impl HnClient {
         let client = self.clone();
         tokio::spawn(async move {
             if let Err(err) = client.fetch_item_network_deduped(id).await {
-                eprintln!("hntui: failed to revalidate item id={id}: {err:#}");
+                logging::log_error(format!("failed to revalidate item id={id}: {err:#}"));
             }
         });
     }

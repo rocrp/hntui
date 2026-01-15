@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::ui::theme;
-use crate::ui::{format_age, now_unix};
+use crate::ui::{format_age, format_error, now_unix};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -238,7 +238,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let now = now_unix();
     let meta = if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
-            format!("Error: {err}"),
+            format!("Error: {}", format_error(err)),
             Style::default().fg(theme::palette().red),
         )])
     } else if let Some(story) = app.current_story.as_ref() {

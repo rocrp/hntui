@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod input;
+mod logging;
 mod state;
 mod tui;
 mod ui;
@@ -25,7 +26,7 @@ pub struct Cli {
     pub cache_size: usize,
 
     /// Max simultaneous HTTP requests.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = 8)]
     pub concurrency: usize,
 
     /// Disable the on-disk cache (items + story list state).
@@ -104,6 +105,7 @@ fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
+    logging::init().context("init logging")?;
     let ui_candidates = ui_config_candidates(&cli);
     let allow_default = cli.ui_config.is_none();
     ui::theme::init_from_candidates(&ui_candidates, allow_default)

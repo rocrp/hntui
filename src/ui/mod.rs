@@ -4,6 +4,7 @@ pub mod story_list;
 pub mod theme;
 
 use crate::app::{App, View};
+use crate::logging;
 use ratatui::Frame;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -52,4 +53,25 @@ pub(crate) fn domain_from_url(url: &str) -> Option<String> {
     let host_port = without_scheme.split('/').next()?;
     let host_port = host_port.split('@').next_back().unwrap_or(host_port);
     Some(host_port.trim_start_matches("www.").to_string())
+}
+
+pub(crate) fn format_error(err: &str) -> String {
+    let mut out = String::from(err);
+    if let Some(tip) = error_tip(err) {
+        out.push_str(" | tip: ");
+        out.push_str(tip);
+    }
+    if let Some(path) = logging::log_path() {
+        out.push_str(" | log: ");
+        out.push_str(&path.to_string_lossy());
+    }
+    out
+}
+
+fn error_tip(err: &str) -> Option<&'static str> {
+    let lower = err.to_ascii_lowercase();
+    if lower.contains("too many open files") || lower.contains("os error 24") {
+        return Some("--concurrency 8 or --no-file-cache");
+    }
+    None
 }

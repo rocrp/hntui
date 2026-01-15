@@ -1,5 +1,6 @@
 use crate::api::{CommentNode, DiskCacheConfig, HnClient, Story};
 use crate::input::{Action, KeyState};
+use crate::logging;
 use crate::state::StateStore;
 use crate::tui::Tui;
 use crate::ui;
@@ -218,7 +219,7 @@ impl App {
         let stories = self.stories.clone();
         tokio::spawn(async move {
             if let Err(err) = store.save_story_list_state(story_ids, stories).await {
-                eprintln!("hntui: failed to save story list state: {err:#}");
+                logging::log_error(format!("failed to save story list state: {err:#}"));
             }
         });
     }
@@ -793,6 +794,9 @@ impl App {
                 }
                 let _ = set_children_loading_in_tree(&mut self.comment_tree, parent_id, false);
                 let _ = set_collapse_in_tree(&mut self.comment_tree, parent_id, true);
+                logging::log_error(format!(
+                    "comment children error parent_id={parent_id}: {message}"
+                ));
                 self.last_error = Some(message);
                 self.rebuild_comment_list(Some(parent_id));
             }
@@ -806,6 +810,7 @@ impl App {
                 self.story_loading = false;
                 self.prefetch_in_flight = false;
                 self.comment_loading = false;
+                logging::log_error(format!("load error: {message}"));
                 self.last_error = Some(message);
             }
             AppEvent::PrefetchError {
@@ -823,6 +828,7 @@ impl App {
                     self.awaiting_prefetch_story_id = None;
                     self.comment_loading = false;
                 }
+                logging::log_error(format!("prefetch error story_id={story_id}: {message}"));
                 self.last_error = Some(message);
                 self.maybe_prefetch_comments();
             }
