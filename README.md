@@ -7,26 +7,13 @@ Hacker News TUI (top stories + nested comments) using the official Firebase API.
 ![Stories view](screenshots/hntui1.png)
 ![Comments view](screenshots/hntui2.png)
 
-## Run
+## Install
 
 ```bash
-cargo run --release
+brew install rocrp/tap/hntui
 ```
 
-Options: `--count`, `--page-size`, `--cache-size`, `--concurrency`, `--no-file-cache`, `--file-cache-dir`, `--file-cache-ttl-secs`, `--base-url`, `--ui-config`
-
-UI config: `ui-config.toml` (TOML, comments supported)
-Search order (unless `--ui-config`): `./ui-config.toml`, binary dir, OS config dir (ProjectDirs)
-If none found, built-in defaults are used.
-Layout keys: `comment_max_lines` (`-1` = unlimited), `comment_default_visible_levels` (1 = top only, 2 = top + replies)
-Font config removed; set font/size in terminal emulator.
-Score/comment color scales: `score_scale.steps`, `comment_scale.steps` (desc min thresholds; last min = 0).
-
-## Cache
-
-- Disk cache: HN items + story list state (restore instantly, refresh in background)
-- TTL (items only): `--file-cache-ttl-secs` (default 3600)
-- Disable: `--no-file-cache`
+Run: `hntui`
 
 ## Keys
 
