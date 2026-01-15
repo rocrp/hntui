@@ -17,11 +17,65 @@ jobs:
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - name: build
+
+      - name: Install Apple certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          cargo build --release --target aarch64-apple-darwin
-      - name: package
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          # Decode certificate
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Build
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Sign binary
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          bin="target/aarch64-apple-darwin/release/hntui"
+          # Find the Developer ID Application identity
+          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "Signing with: $IDENTITY"
+          codesign --force --options runtime --sign "$IDENTITY" "$bin"
+          codesign --verify --verbose "$bin"
+
+      - name: Notarize binary
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # Create zip for notarization
+          zip -j hntui-notarize.zip target/aarch64-apple-darwin/release/hntui
+
+          # Submit for notarization and wait
+          xcrun notarytool submit hntui-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          rm hntui-notarize.zip
+
+      - name: Package
         run: |
           set -euo pipefail
           bin="hntui"
@@ -32,7 +86,8 @@ jobs:
           cp "target/${target}/release/${bin}" "dist/${bin}"
           (cd dist && tar -czf "../${out}.tar.gz" "${bin}")
           rm -f "dist/${bin}"
-      - name: release
+
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
