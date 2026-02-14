@@ -9,8 +9,16 @@ Hacker News TUI (top stories + nested comments) using the official Firebase API.
 
 ## Install
 
+Homebrew (macOS + Linux Homebrew):
+
 ```bash
 brew install rocrp/tap/hntui
+```
+
+Linux (no Homebrew):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh | bash
 ```
 
 Run: `hntui`

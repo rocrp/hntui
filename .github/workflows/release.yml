@@ -7,15 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  release-macos-arm64:
+  build-macos:
     runs-on: macos-14
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            os: darwin
+            arch: amd64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
 
       - name: Install Apple certificate
@@ -28,30 +36,40 @@ jobs:
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
-          # Decode certificate
           echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
 
-          # Create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Import certificate
           security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Sign binary
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          bin="target/aarch64-apple-darwin/release/hntui"
-          # Find the Developer ID Application identity
-          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          bin="target/${{ matrix.target }}/release/hntui"
+          test -f "$bin"
+          IDENTITY=$(
+            security find-identity -v -p codesigning \
+              | grep "Developer ID Application" \
+              | grep "(${APPLE_TEAM_ID})" \
+              | head -1 \
+              | sed 's/.*"\(.*\)".*/\1/'
+          )
+
+          if [ -z "${IDENTITY:-}" ]; then
+            echo "No Developer ID Application identity for team: ${APPLE_TEAM_ID}" >&2
+            security find-identity -v -p codesigning || true
+            exit 1
+          fi
+
           echo "Signing with: $IDENTITY"
           codesign --force --options runtime --sign "$IDENTITY" "$bin"
           codesign --verify --verbose "$bin"
@@ -63,10 +81,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          # Create zip for notarization
-          zip -j hntui-notarize.zip target/aarch64-apple-darwin/release/hntui
+          bin="target/${{ matrix.target }}/release/hntui"
+          test -f "$bin"
 
-          # Submit for notarization and wait
+          zip -j hntui-notarize.zip "$bin"
+
           xcrun notarytool submit hntui-notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
@@ -79,25 +98,95 @@ jobs:
         run: |
           set -euo pipefail
           bin="hntui"
-          target="aarch64-apple-darwin"
-          version="${GITHUB_REF_NAME}"
-          out="${bin}-${version}-macos-arm64"
+          tag="${GITHUB_REF_NAME}"
+          out="${bin}-${tag}-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p dist
-          cp "target/${target}/release/${bin}" "dist/${bin}"
-          (cd dist && tar -czf "../${out}.tar.gz" "${bin}")
+          cp "target/${{ matrix.target }}/release/${bin}" "dist/${bin}"
+          tar -czf "dist/${out}.tar.gz" -C dist "${bin}"
           rm -f "dist/${bin}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          bin="hntui"
+          tag="${GITHUB_REF_NAME}"
+          out="${bin}-${tag}-linux-amd64"
+          mkdir -p dist
+          cp "target/x86_64-unknown-linux-musl/release/${bin}" "dist/${bin}"
+          tar -czf "dist/${out}.tar.gz" -C dist "${bin}"
+          rm -f "dist/${bin}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  smoke-arch:
+    needs:
+      - build-linux
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install deps
+        run: pacman -Sy --noconfirm --needed ca-certificates tar gzip
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar -xzf dist/*.tar.gz -C out
+          ./out/hntui --help
+
+  publish:
+    needs:
+      - build-macos
+      - build-linux
+      - smoke-arch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            hntui-*.tar.gz
+            dist/*.tar.gz
 
-  update-homebrew:
-    needs: release-macos-arm64
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
       - name: Update Homebrew formula
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -105,49 +194,69 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
+          repo="${GITHUB_REPOSITORY}"
 
-          # Wait for release asset to be available
-          sleep 10
+          bin="hntui"
+          asset_darwin_arm64="${bin}-${tag}-darwin-arm64.tar.gz"
+          asset_darwin_amd64="${bin}-${tag}-darwin-amd64.tar.gz"
+          asset_linux_amd64="${bin}-${tag}-linux-amd64.tar.gz"
 
-          # Download the release tarball and compute SHA256
-          url="https://github.com/rocrp/hntui/releases/download/${tag}/hntui-${tag}-macos-arm64.tar.gz"
-          sha256=$(curl -sL "$url" | sha256sum | cut -d' ' -f1)
+          test -f "dist/${asset_darwin_arm64}"
+          test -f "dist/${asset_darwin_amd64}"
+          test -f "dist/${asset_linux_amd64}"
 
-          # Clone homebrew-tap repo
+          sha_darwin_arm64="$(sha256sum "dist/${asset_darwin_arm64}" | cut -d' ' -f1)"
+          sha_darwin_amd64="$(sha256sum "dist/${asset_darwin_amd64}" | cut -d' ' -f1)"
+          sha_linux_amd64="$(sha256sum "dist/${asset_linux_amd64}" | cut -d' ' -f1)"
+
+          url_darwin_arm64="${GITHUB_SERVER_URL}/${repo}/releases/download/${tag}/${asset_darwin_arm64}"
+          url_darwin_amd64="${GITHUB_SERVER_URL}/${repo}/releases/download/${tag}/${asset_darwin_amd64}"
+          url_linux_amd64="${GITHUB_SERVER_URL}/${repo}/releases/download/${tag}/${asset_linux_amd64}"
+
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/rocrp/homebrew-tap.git"
           cd homebrew-tap
 
-          # Update formula
           cat > Formula/hntui.rb << EOF
           class Hntui < Formula
             desc "Hacker News TUI with top stories and nested comments"
-            homepage "https://github.com/rocrp/hntui"
+            homepage "https://github.com/${repo}"
             version "${version}"
             license "MIT"
 
             on_macos do
               on_arm do
-                url "https://github.com/rocrp/hntui/releases/download/${tag}/hntui-${tag}-macos-arm64.tar.gz"
-                sha256 "${sha256}"
+                url "${url_darwin_arm64}"
+                sha256 "${sha_darwin_arm64}"
+              end
+
+              on_intel do
+                url "${url_darwin_amd64}"
+                sha256 "${sha_darwin_amd64}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "${url_linux_amd64}"
+                sha256 "${sha_linux_amd64}"
               end
             end
 
             def install
-              bin.install "hntui"
+              bin.install "${bin}"
             end
 
             test do
-              assert_match "hntui", shell_output("#{bin}/hntui --help")
+              system "#{bin}/hntui", "--help"
             end
           end
           EOF
 
-          # Fix indentation (heredoc adds leading spaces)
           sed -i 's/^          //' Formula/hntui.rb
 
-          # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/hntui.rb
           git commit -m "Update hntui to ${version}"
           git push
+
