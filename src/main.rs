@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long)]
     pub file_cache_dir: Option<PathBuf>,
 
+    /// Log file path (disabled by default).
+    #[arg(long)]
+    pub log_file: Option<PathBuf>,
+
     /// Max age for cached items (seconds).
     #[arg(long, default_value_t = 3600)]
     pub file_cache_ttl_secs: u64,
@@ -66,6 +70,9 @@ impl Cli {
         );
         if let Some(path) = &self.ui_config {
             anyhow::ensure!(!path.as_os_str().is_empty(), "--ui-config must be non-empty");
+        }
+        if let Some(path) = &self.log_file {
+            anyhow::ensure!(!path.as_os_str().is_empty(), "--log-file must be non-empty");
         }
         Ok(())
     }
@@ -105,7 +112,7 @@ fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
-    logging::init().context("init logging")?;
+    logging::init(cli.log_file.clone()).context("init logging")?;
     let ui_candidates = ui_config_candidates(&cli);
     let allow_default = cli.ui_config.is_none();
     ui::theme::init_from_candidates(&ui_candidates, allow_default)
