@@ -352,10 +352,6 @@ pub(crate) fn focus_gradient_fg(
     distance: usize,
     half_viewport: usize,
 ) -> Option<Color> {
-    if distance == 0 {
-        return None;
-    }
-
     // Stable rainbow hue based on line position (not distance)
     let hue_pos = (line_index as f64 * 0.08) % 1.0;
     let rainbow_color = rainbow(hue_pos);

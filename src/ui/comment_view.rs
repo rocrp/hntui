@@ -188,32 +188,30 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut visible_lines = Vec::with_capacity(end.saturating_sub(start));
         let mut line_idx = 0usize;
         'outer: for (idx, lines) in comment_lines.iter().enumerate() {
-            for line in lines {
+            for (line_in_comment, line) in lines.iter().enumerate() {
                 if line_idx >= start && line_idx < end {
                     let mut line = line.clone();
-                    if idx == selected {
-                        line = line.patch_style(highlight_style);
+                    // Rainbow gradient based on distance from selected comment.
+                    let dist = if line_idx < sel_start {
+                        sel_start - line_idx
+                    } else if line_idx >= sel_end {
+                        line_idx - sel_end + 1
                     } else {
-                        // Rainbow gradient based on distance from selected comment
-                        let dist = if line_idx < sel_start {
-                            sel_start - line_idx
-                        } else if line_idx >= sel_end {
-                            line_idx - sel_end + 1
-                        } else {
-                            0
-                        };
-                        if let Some(fg) = theme::focus_gradient_fg(line_idx, dist, half_viewport) {
-                            // Override each span's foreground color
-                            line = Line::from(
-                                line.spans
-                                    .into_iter()
-                                    .map(|span| {
-                                        let new_style = span.style.fg(fg);
-                                        Span::styled(span.content, new_style)
-                                    })
-                                    .collect::<Vec<_>>(),
-                            );
-                        }
+                        0
+                    };
+                    if let Some(fg) = theme::focus_gradient_fg(line_idx, dist, half_viewport) {
+                        // Override each span's foreground color.
+                        line = Line::from(
+                            line.spans
+                                .into_iter()
+                                .map(|span| Span::styled(span.content, span.style.fg(fg)))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+
+                    // Story-list-like selection: only highlight the "cell" line (comment header).
+                    if idx == selected && line_in_comment == 0 {
+                        line = line.patch_style(highlight_style);
                     }
                     visible_lines.push(line);
                 }
