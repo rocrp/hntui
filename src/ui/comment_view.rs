@@ -35,9 +35,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
     let content_width = list_area.width as usize;
 
-    let highlight_style = Style::default()
-        .bg(theme::palette().surface2)
-        .add_modifier(Modifier::BOLD);
+    // Avoid BOLD for selection: many terminals render it as "bright" which effectively shifts colors.
+    let highlight_style = Style::default().bg(theme::palette().surface2);
 
     if app.comment_loading && app.comment_list.is_empty() {
         app.comment_item_heights.clear();
