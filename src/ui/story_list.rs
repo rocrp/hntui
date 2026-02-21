@@ -16,11 +16,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         format!("Hacker News (loading {spinner})")
     } else if app.story_loading {
         format!("Hacker News (refreshing {spinner})")
-    } else if app.prefetch_in_flight && !app.comment_prefetch_in_flight_ids.is_empty() {
+    } else if app.prefetch_in_flight && app.has_comment_prefetch_in_flight() {
         format!("Hacker News (prefetching + comments {spinner})")
     } else if app.prefetch_in_flight {
         format!("Hacker News (prefetching {spinner})")
-    } else if !app.comment_prefetch_in_flight_ids.is_empty() {
+    } else if app.has_comment_prefetch_in_flight() {
         format!("Hacker News (preloading comments {spinner})")
     } else {
         "Hacker News".to_string()
