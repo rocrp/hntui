@@ -29,15 +29,21 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
 
     let state = plugin.state();
 
+    let model_tag = if plugin.model_name.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", plugin.model_name)
+    };
+
     let title = match state {
         SummarizeState::Loading => {
             format!(
-                " Summarizing {spinner} ({} comments) ",
+                " Summarizing {spinner} ({} comments){model_tag} ",
                 plugin.comment_count
             )
         }
-        SummarizeState::Streaming => format!(" Summarizing {spinner} "),
-        SummarizeState::Done => " Summary ".to_string(),
+        SummarizeState::Streaming => format!(" Summarizing {spinner}{model_tag} "),
+        SummarizeState::Done => format!(" Summary{model_tag} "),
         SummarizeState::Error => " Summary Error ".to_string(),
         SummarizeState::Idle => return,
     };
@@ -80,16 +86,16 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     // Clear popup area and fill background
     frame.render_widget(Clear, popup);
 
-    // Render scrollable content using Paragraph::scroll() — scrolls by display rows
+    // Render block (border + title + background) on full popup rect
+    frame.render_widget(block.style(bg), popup);
+
+    // Render content paragraph (without block) into content_area only,
+    // so scrolled text never bleeds into the hint row
     let content_paragraph = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((plugin.scroll_offset as u16, 0))
-        .block(block)
         .style(bg);
-    // Render block + content in full popup, clipped to content_area by the layout split
-    // Actually, Paragraph with block renders within popup bounds. The hint sits in hint_area below.
-    // We render the paragraph covering content_area only (+ border from block in popup).
-    frame.render_widget(content_paragraph, popup);
+    frame.render_widget(content_paragraph, content_area);
 
     // Render hint at bottom (not affected by scroll)
     let hint = match state {

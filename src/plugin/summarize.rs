@@ -21,6 +21,8 @@ pub struct SummarizePlugin {
     pub comment_count: usize,
     /// Set during render: visible content height in rows (for page scroll)
     pub content_height: usize,
+    /// LLM model name for display in overlay title
+    pub model_name: String,
     http: reqwest::Client,
 }
 
@@ -34,6 +36,7 @@ impl SummarizePlugin {
             scroll_offset: 0,
             comment_count: 0,
             content_height: 0,
+            model_name: String::new(),
             http,
         }
     }
@@ -52,6 +55,7 @@ impl SummarizePlugin {
         self.error = None;
         self.scroll_offset = 0;
         self.comment_count = 0;
+        self.model_name.clear();
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
@@ -98,6 +102,7 @@ impl SummarizePlugin {
         self.error = None;
         self.scroll_offset = 0;
         self.comment_count = ctx.comment_list.len();
+        self.model_name = config.model.clone();
 
         let prompt = build_prompt(story, ctx.comment_list, config.max_comments);
         let messages = vec![
