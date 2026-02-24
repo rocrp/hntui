@@ -18,6 +18,7 @@ pub enum Action {
     Expand,
     ToggleCollapse,
     Refresh,
+    Summarize,
 }
 
 #[derive(Debug, Default)]
@@ -54,8 +55,9 @@ impl KeyState {
                     (KeyCode::Enter, _) => Some(Action::Enter),
                     (KeyCode::Char(' '), KeyModifiers::NONE) => Some(Action::OpenComments),
                     (KeyCode::Char('o'), KeyModifiers::NONE) => Some(Action::OpenPrimaryBrowser),
-                    (KeyCode::Char('o'), KeyModifiers::SHIFT)
-                    | (KeyCode::Char('O'), _) => Some(Action::OpenSecondaryBrowser),
+                    (KeyCode::Char('o'), KeyModifiers::SHIFT) | (KeyCode::Char('O'), _) => {
+                        Some(Action::OpenSecondaryBrowser)
+                    }
                     (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, _) => {
                         Some(Action::BackOrQuit)
                     }
@@ -67,6 +69,7 @@ impl KeyState {
                     }
                     (KeyCode::Char('c'), KeyModifiers::NONE) => Some(Action::ToggleCollapse),
                     (KeyCode::Char('r'), KeyModifiers::NONE) => Some(Action::Refresh),
+                    (KeyCode::Char('s'), KeyModifiers::NONE) => Some(Action::Summarize),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::BackOrQuit),
                     _ => None,
                 }

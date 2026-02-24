@@ -1,5 +1,6 @@
 pub mod comment_view;
 pub mod help;
+pub mod plugin_overlay;
 pub mod story_list;
 pub mod theme;
 
@@ -13,6 +14,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         View::Stories => story_list::render(frame, app),
         View::Comments => comment_view::render(frame, app),
     }
+    plugin_overlay::render(frame, &app.summarize_plugin, app.spinner_frame());
     if app.help_visible {
         help::render(frame, app);
     }

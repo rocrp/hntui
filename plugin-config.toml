@@ -1,0 +1,7 @@
+[summarize]
+api_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+model = "gemini-flash-lite-latest"
+# API key: set HNTUI_LLM_API_KEY env var (preferred) or uncomment below
+# api_key = ""
+max_comments = 200
+system_prompt = "Summarize this Hacker News discussion concisely. Highlight key arguments, disagreements, and consensus points."

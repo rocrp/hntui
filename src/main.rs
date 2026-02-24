@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod input;
 mod logging;
+mod plugin;
 mod state;
 mod tui;
 mod ui;
@@ -52,6 +53,10 @@ pub struct Cli {
     /// UI config file path (optional; will search defaults).
     #[arg(long)]
     pub ui_config: Option<PathBuf>,
+
+    /// Plugin config file path (optional; will search defaults).
+    #[arg(long)]
+    pub plugin_config: Option<PathBuf>,
 }
 
 impl Cli {
@@ -74,38 +79,58 @@ impl Cli {
         if let Some(path) = &self.log_file {
             anyhow::ensure!(!path.as_os_str().is_empty(), "--log-file must be non-empty");
         }
+        if let Some(path) = &self.plugin_config {
+            anyhow::ensure!(
+                !path.as_os_str().is_empty(),
+                "--plugin-config must be non-empty"
+            );
+        }
         Ok(())
     }
 }
 
-fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
-    if let Some(path) = &cli.ui_config {
+fn config_candidates(cli_override: Option<&PathBuf>, filename: &str) -> Vec<PathBuf> {
+    if let Some(path) = cli_override {
         return vec![path.clone()];
     }
 
     let mut candidates = Vec::new();
-    let cwd = PathBuf::from("ui-config.toml");
-    if !candidates.contains(&cwd) {
-        candidates.push(cwd);
-    }
+    let mut push = |p: PathBuf| {
+        if !candidates.contains(&p) {
+            candidates.push(p);
+        }
+    };
+
+    push(PathBuf::from(filename));
 
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let exe_cfg = exe_dir.join("ui-config.toml");
-            if !candidates.contains(&exe_cfg) {
-                candidates.push(exe_cfg);
-            }
+            push(exe_dir.join(filename));
         }
     }
 
     if let Some(proj) = directories::ProjectDirs::from("dev", "hntui", "hntui") {
-        let cfg = proj.config_dir().join("ui-config.toml");
-        if !candidates.contains(&cfg) {
-            candidates.push(cfg);
-        }
+        push(proj.config_dir().join(filename));
+    }
+
+    // Also search ~/.config/hntui/ (XDG-style)
+    if let Some(home) = dirs_home() {
+        push(home.join(".config").join("hntui").join(filename));
     }
 
     candidates
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
+    config_candidates(cli.ui_config.as_ref(), "ui-config.toml")
+}
+
+fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
+    config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml")
 }
 
 #[tokio::main]
@@ -117,5 +142,10 @@ async fn main() -> anyhow::Result<()> {
     let allow_default = cli.ui_config.is_none();
     ui::theme::init_from_candidates(&ui_candidates, allow_default)
         .with_context(|| "load ui config")?;
-    app::run(cli).await
+
+    let plugin_candidates = plugin_config_candidates(&cli);
+    let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)
+        .with_context(|| "load plugin config")?;
+
+    app::run(cli, plugin_config).await
 }

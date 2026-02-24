@@ -251,13 +251,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  h/←:collapse  l/→:expand  Enter/c:toggle  o:comments  O:source  r:refresh  ?:help  q:back    {} comments",
+        "j/k:nav  h/←:collapse  l/→:expand  Enter/c:toggle  s:summarize  o:comments  O:source  r:refresh  ?:help  q:back    {} comments",
         app.comment_list.len()
     ));
     frame.render_widget(Paragraph::new(vec![meta, help]), footer_inner);
 }
 
-fn hn_html_to_plain(html: &str) -> String {
+pub(crate) fn hn_html_to_plain(html: &str) -> String {
     let html = html
         .replace("<p>", "\n\n")
         .replace("</p>", "\n\n")

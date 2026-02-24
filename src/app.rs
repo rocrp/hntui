@@ -1,6 +1,9 @@
 use crate::api::{CommentNode, DiskCacheConfig, HnClient, Story};
 use crate::input::{Action, KeyState};
 use crate::logging;
+use crate::plugin::config::PluginConfig;
+use crate::plugin::summarize::SummarizePlugin;
+use crate::plugin::{PluginContext, PluginEvent};
 use crate::state::StateStore;
 use crate::tui::Tui;
 use crate::ui;
@@ -50,6 +53,7 @@ pub enum AppEvent {
         parent_id: u64,
         message: String,
     },
+    PluginEvent(PluginEvent),
     Error {
         generation: u64,
         message: String,
@@ -116,6 +120,8 @@ pub struct App {
     prefetched_comments_cache: HashMap<u64, Vec<CommentNode>>,
     prefetch_cache_order: Vec<u64>,
     awaiting_prefetch_story_id: Option<u64>,
+    pub summarize_plugin: SummarizePlugin,
+
     input: KeyState,
     should_quit: bool,
     spinner_idx: usize,
@@ -133,12 +139,17 @@ impl App {
         client: HnClient,
         tx: mpsc::UnboundedSender<AppEvent>,
         state_store: Option<StateStore>,
+        plugin_config: Option<PluginConfig>,
     ) -> Self {
         let mut story_list_state = ListState::default();
         story_list_state.select(Some(0));
 
         let mut comment_list_state = ListState::default();
         comment_list_state.select(Some(0));
+
+        let summarize_config = plugin_config.and_then(|c| c.summarize);
+        let summarize_plugin =
+            SummarizePlugin::new(summarize_config, reqwest::Client::new());
 
         Self {
             view: View::Stories,
@@ -174,6 +185,7 @@ impl App {
             prefetched_comments_cache: HashMap::new(),
             prefetch_cache_order: Vec::new(),
             awaiting_prefetch_story_id: None,
+            summarize_plugin,
             input: KeyState::default(),
             should_quit: false,
             spinner_idx: 0,
@@ -204,6 +216,11 @@ impl App {
             || self.comment_loading
             || !self.comment_prefetch_in_flight.is_empty()
             || !self.comment_children_in_flight.is_empty()
+            || matches!(
+                self.summarize_plugin.state(),
+                crate::plugin::summarize::SummarizeState::Loading
+                    | crate::plugin::summarize::SummarizeState::Streaming
+            )
     }
 
     pub fn restore_story_list_state(&mut self, story_ids: Vec<u64>, stories: Vec<Story>) {
@@ -519,6 +536,17 @@ impl App {
             }
             return;
         }
+        if self.summarize_plugin.is_overlay_visible() {
+            match action {
+                Action::BackOrQuit => self.summarize_plugin.dismiss(),
+                Action::MoveDown => self.summarize_plugin.scroll_down(1),
+                Action::MoveUp => self.summarize_plugin.scroll_up(1),
+                Action::PageDown => self.summarize_plugin.scroll_down(10),
+                Action::PageUp => self.summarize_plugin.scroll_up(10),
+                _ => {}
+            }
+            return;
+        }
 
         match (self.view, action) {
             (View::Stories, Action::BackOrQuit) => self.should_quit = true,
@@ -671,6 +699,15 @@ impl App {
             (View::Comments, Action::Collapse) => self.collapse_selected_comment(),
             (View::Comments, Action::Expand) => self.expand_selected_comment(),
             (View::Comments, Action::ToggleCollapse) => self.toggle_selected_comment_collapse(),
+
+            (View::Comments, Action::Summarize) => {
+                let ctx = PluginContext {
+                    current_story: self.current_story.as_ref(),
+                    comment_list: &self.comment_list,
+                    tx: self.tx.clone(),
+                };
+                self.summarize_plugin.start(&ctx);
+            }
 
             (_, _) => {}
         }
@@ -840,6 +877,9 @@ impl App {
                 ));
                 self.last_error = Some(message);
                 self.rebuild_comment_list(Some(parent_id));
+            }
+            AppEvent::PluginEvent(event) => {
+                self.summarize_plugin.handle_event(event);
             }
             AppEvent::Error {
                 generation,
@@ -1575,7 +1615,7 @@ fn page_up_comment_list(
     }
 }
 
-pub async fn run(cli: Cli) -> Result<()> {
+pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
     let cache_dir = if cli.no_file_cache {
         None
     } else {
@@ -1603,7 +1643,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
-    let mut app = App::new(cli, client, tx.clone(), state_store.clone());
+    let mut app = App::new(cli, client, tx.clone(), state_store.clone(), plugin_config);
 
     if let Some(store) = &state_store {
         if let Some(state) = store.load_story_list_state().await? {
