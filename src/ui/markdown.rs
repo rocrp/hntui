@@ -206,7 +206,7 @@ fn flush_line(
     current_spans: &mut Vec<Span<'static>>,
     prefix_spans: &[Span<'static>],
 ) {
-    if current_spans.is_empty() && prefix_spans.is_empty() {
+    if current_spans.is_empty() {
         return;
     }
     let mut spans = prefix_spans.to_vec();
