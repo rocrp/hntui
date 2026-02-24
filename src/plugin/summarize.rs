@@ -19,6 +19,8 @@ pub struct SummarizePlugin {
     pub error: Option<String>,
     pub scroll_offset: usize,
     pub comment_count: usize,
+    /// Set during render: visible content height in rows (for page scroll)
+    pub content_height: usize,
     http: reqwest::Client,
 }
 
@@ -31,6 +33,7 @@ impl SummarizePlugin {
             error: None,
             scroll_offset: 0,
             comment_count: 0,
+            content_height: 0,
             http,
         }
     }

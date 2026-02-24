@@ -541,8 +541,14 @@ impl App {
                 Action::BackOrQuit => self.summarize_plugin.dismiss(),
                 Action::MoveDown => self.summarize_plugin.scroll_down(1),
                 Action::MoveUp => self.summarize_plugin.scroll_up(1),
-                Action::PageDown => self.summarize_plugin.scroll_down(10),
-                Action::PageUp => self.summarize_plugin.scroll_up(10),
+                Action::PageDown => {
+                    let amount = self.summarize_plugin.content_height.saturating_sub(2).max(1);
+                    self.summarize_plugin.scroll_down(amount);
+                }
+                Action::PageUp => {
+                    let amount = self.summarize_plugin.content_height.saturating_sub(2).max(1);
+                    self.summarize_plugin.scroll_up(amount);
+                }
                 _ => {}
             }
             return;

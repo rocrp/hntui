@@ -100,7 +100,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         key_style,
         desc_style,
     ));
-    lines.push(kv("o", "open comments page (browser)", key_style, desc_style));
+    lines.push(kv(
+        "o",
+        "open comments page (browser)",
+        key_style,
+        desc_style,
+    ));
     lines.push(kv("O", "open source link (browser)", key_style, desc_style));
     lines.push(kv("s", "summarize (AI)", key_style, desc_style));
     lines.push(kv("r", "refresh", key_style, desc_style));

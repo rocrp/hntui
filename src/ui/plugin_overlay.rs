@@ -1,12 +1,12 @@
 use crate::plugin::summarize::{SummarizePlugin, SummarizeState};
-use crate::ui::theme;
-use ratatui::layout::Rect;
+use crate::ui::{markdown, theme};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-pub fn render(frame: &mut Frame, plugin: &SummarizePlugin, spinner: char) {
+pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     if !plugin.is_overlay_visible() {
         return;
     }
@@ -23,14 +23,19 @@ pub fn render(frame: &mut Frame, plugin: &SummarizePlugin, spinner: char) {
     let header_style = Style::default()
         .fg(theme::palette().mauve)
         .add_modifier(Modifier::BOLD);
-    let text_style = Style::default().fg(theme::palette().text);
     let hint_style = Style::default().fg(theme::palette().subtext0);
     let error_style = Style::default().fg(theme::palette().red);
+    let bg = Style::default().bg(theme::palette().surface2);
 
     let state = plugin.state();
 
     let title = match state {
-        SummarizeState::Loading => format!(" Summarizing {spinner} ({} comments) ", plugin.comment_count),
+        SummarizeState::Loading => {
+            format!(
+                " Summarizing {spinner} ({} comments) ",
+                plugin.comment_count
+            )
+        }
         SummarizeState::Streaming => format!(" Summarizing {spinner} "),
         SummarizeState::Done => " Summary ".to_string(),
         SummarizeState::Error => " Summary Error ".to_string(),
@@ -42,69 +47,70 @@ pub fn render(frame: &mut Frame, plugin: &SummarizePlugin, spinner: char) {
         .title(Span::styled(title, header_style));
     let inner = block.inner(popup);
 
-    // Reserve 1 line for hint at bottom
-    let content_height = inner.height.saturating_sub(1) as usize;
+    // Split inner into [content, hint(1 line)]
+    let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+    let content_area = layout[0];
+    let hint_area = layout[1];
 
-    let mut lines: Vec<Line> = Vec::new();
-    match state {
+    // Store content height for page scroll calculations
+    plugin.content_height = content_area.height as usize;
+
+    // Build content lines
+    let lines: Vec<Line> = match state {
         SummarizeState::Loading => {
-            lines.push(Line::from(Span::styled(
+            vec![Line::from(Span::styled(
                 format!("Waiting for LLM response {spinner}"),
                 hint_style,
-            )));
+            ))]
         }
         SummarizeState::Streaming | SummarizeState::Done => {
-            for raw_line in plugin.summary_text.lines() {
-                lines.push(Line::from(Span::styled(raw_line.to_string(), text_style)));
-            }
-            if plugin.summary_text.ends_with('\n') || plugin.summary_text.is_empty() {
-                lines.push(Line::from(""));
-            }
+            let mut l = markdown::render_markdown(&plugin.summary_text);
             if state == SummarizeState::Streaming {
-                lines.push(Line::from(Span::styled(
-                    format!("{spinner}"),
-                    hint_style,
-                )));
+                l.push(Line::from(Span::styled(format!("{spinner}"), hint_style)));
             }
+            l
         }
         SummarizeState::Error => {
             let msg = plugin.error.as_deref().unwrap_or("Unknown error");
-            lines.push(Line::from(Span::styled(msg.to_string(), error_style)));
+            vec![Line::from(Span::styled(msg.to_string(), error_style))]
         }
-        SummarizeState::Idle => {}
-    }
+        SummarizeState::Idle => vec![],
+    };
 
-    // Apply scroll offset
-    let total_lines = lines.len();
-    let scroll = plugin.scroll_offset.min(total_lines.saturating_sub(content_height));
-    let visible: Vec<Line> = lines.into_iter().skip(scroll).take(content_height).collect();
+    // Clear popup area and fill background
+    frame.render_widget(Clear, popup);
 
+    // Render scrollable content using Paragraph::scroll() — scrolls by display rows
+    let content_paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((plugin.scroll_offset as u16, 0))
+        .block(block)
+        .style(bg);
+    // Render block + content in full popup, clipped to content_area by the layout split
+    // Actually, Paragraph with block renders within popup bounds. The hint sits in hint_area below.
+    // We render the paragraph covering content_area only (+ border from block in popup).
+    frame.render_widget(content_paragraph, popup);
+
+    // Render hint at bottom (not affected by scroll)
     let hint = match state {
         SummarizeState::Done | SummarizeState::Error => "j/k: scroll  q/Esc: close",
         _ => "q/Esc: cancel",
     };
-    let hint_line = Line::from(Span::styled(hint.to_string(), hint_style));
-
-    // Build content: visible lines + spacer + hint
-    let mut content_lines = visible;
-    // Pad to fill remaining space so hint is at bottom
-    while content_lines.len() < content_height {
-        content_lines.push(Line::from(""));
-    }
-    content_lines.push(hint_line);
-
-    frame.render_widget(Clear, popup);
-    let paragraph = Paragraph::new(Text::from(content_lines))
-        .wrap(Wrap { trim: false })
-        .block(block)
-        .style(Style::default().bg(theme::palette().surface2));
-    frame.render_widget(paragraph, popup);
+    let hint_paragraph = Paragraph::new(Line::from(Span::styled(hint, hint_style))).style(bg);
+    frame.render_widget(hint_paragraph, hint_area);
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
     let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
-    let y = area.y.saturating_add(area.height.saturating_sub(height) / 2);
-    Rect { x, y, width, height }
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height) / 2);
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
