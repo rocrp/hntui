@@ -408,13 +408,44 @@ impl App {
             }
         }
 
-        // Start new prefetches for top-N not already in-flight
+        // When the cache is full, only prefetch stories closer to the cursor than the
+        // furthest cached story. Otherwise we'd evict a neighbor and immediately
+        // re-prefetch it, causing an endless spinner/checkmark flashing loop.
+        let max_cached_distance = if self.prefetched_comments_cache.len() >= PREFETCH_CACHE_CAP {
+            let selected = self.story_list_state.selected().unwrap_or(0);
+            self.prefetch_cache_order
+                .iter()
+                .filter_map(|id| {
+                    self.stories
+                        .iter()
+                        .position(|s| s.id == *id)
+                        .map(|pos| pos.abs_diff(selected))
+                })
+                .max()
+        } else {
+            None
+        };
+
+        let selected = self.story_list_state.selected().unwrap_or(0);
         for candidate in candidates {
             if self.comment_prefetch_in_flight.len() >= MAX_COMMENT_PREFETCH_IN_FLIGHT {
                 break;
             }
             if self.comment_prefetch_in_flight.contains_key(&candidate.story.id) {
                 continue;
+            }
+            // Skip candidates that aren't closer than the furthest cached story —
+            // inserting them would evict something equally close, causing churn.
+            if let Some(max_dist) = max_cached_distance {
+                let candidate_dist = self
+                    .stories
+                    .iter()
+                    .position(|s| s.id == candidate.story.id)
+                    .map(|pos| pos.abs_diff(selected))
+                    .unwrap_or(usize::MAX);
+                if candidate_dist >= max_dist {
+                    continue;
+                }
             }
             self.start_comment_prefetch(candidate.story);
         }
