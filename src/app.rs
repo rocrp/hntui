@@ -1024,7 +1024,7 @@ impl App {
     }
 
     fn can_prefetch_story(&self, story: &Story) -> bool {
-        if story.kids.is_empty() {
+        if story.kids.is_empty() && story.comment_count == 0 {
             return false;
         }
         if self.prefetched_comments_cache.contains_key(&story.id) {
