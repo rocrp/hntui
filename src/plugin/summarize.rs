@@ -2,6 +2,7 @@ use crate::plugin::config::SummarizeConfig;
 use crate::plugin::llm::{stream_chat_completion, ChatMessage};
 use crate::plugin::{PluginContext, PluginEvent};
 use crate::ui::comment_view::hn_html_to_plain;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummarizeState {
@@ -23,6 +24,12 @@ pub struct SummarizePlugin {
     pub content_height: usize,
     /// LLM model name for display in overlay title
     pub model_name: String,
+    /// Brief "Copied!" flash timestamp
+    pub copied_flash: Option<Instant>,
+    /// Story metadata for copy
+    story_title: String,
+    story_url: Option<String>,
+    story_id: u64,
     http: reqwest::Client,
 }
 
@@ -37,6 +44,10 @@ impl SummarizePlugin {
             comment_count: 0,
             content_height: 0,
             model_name: String::new(),
+            copied_flash: None,
+            story_title: String::new(),
+            story_url: None,
+            story_id: 0,
             http,
         }
     }
@@ -56,6 +67,10 @@ impl SummarizePlugin {
         self.scroll_offset = 0;
         self.comment_count = 0;
         self.model_name.clear();
+        self.copied_flash = None;
+        self.story_title.clear();
+        self.story_url = None;
+        self.story_id = 0;
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
@@ -103,6 +118,10 @@ impl SummarizePlugin {
         self.scroll_offset = 0;
         self.comment_count = ctx.comment_list.len();
         self.model_name = config.model.clone();
+        self.copied_flash = None;
+        self.story_title = story.title.clone();
+        self.story_url = story.url.clone();
+        self.story_id = story.id;
 
         let prompt = build_prompt(story, ctx.comment_list, config.max_comments);
         let messages = vec![
@@ -124,6 +143,35 @@ impl SummarizePlugin {
         tokio::spawn(async move {
             stream_chat_completion(&http, &api_url, &api_key, &model, messages, tx).await;
         });
+    }
+
+    /// Build clipboard text with metadata header + raw summary markdown.
+    fn build_copy_text(&self) -> String {
+        let hn_link = format!("https://news.ycombinator.com/item?id={}", self.story_id);
+        let mut out = format!("# {}\n\n", self.story_title);
+        if let Some(url) = &self.story_url {
+            out.push_str(&format!("- Source: {url}\n"));
+        }
+        out.push_str(&format!("- HN: {hn_link}\n"));
+        out.push_str("\n---\n\n");
+        out.push_str(&self.summary_text);
+        out
+    }
+
+    /// Copy summary with metadata to system clipboard. Returns true on success.
+    #[cfg(not(target_os = "android"))]
+    pub fn copy_summary(&mut self) -> bool {
+        if self.summary_text.is_empty() {
+            return false;
+        }
+        let text = self.build_copy_text();
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+            Ok(()) => {
+                self.copied_flash = Some(Instant::now());
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     pub fn handle_event(&mut self, event: PluginEvent) {

@@ -580,6 +580,10 @@ impl App {
                     let amount = self.summarize_plugin.content_height.saturating_sub(2).max(1);
                     self.summarize_plugin.scroll_up(amount);
                 }
+                // 'c' key -> copy summary to clipboard
+                Action::ToggleCollapse => {
+                    self.summarize_plugin.copy_summary();
+                }
                 _ => {}
             }
             return;

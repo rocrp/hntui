@@ -98,11 +98,24 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     frame.render_widget(content_paragraph, content_area);
 
     // Render hint at bottom (not affected by scroll)
-    let hint = match state {
-        SummarizeState::Done | SummarizeState::Error => "j/k: scroll  q/Esc: close",
-        _ => "q/Esc: cancel",
+    let show_copied = plugin
+        .copied_flash
+        .is_some_and(|t| t.elapsed().as_secs() < 2);
+    let hint_line = if show_copied {
+        let copied_style = Style::default()
+            .fg(theme::palette().green)
+            .add_modifier(Modifier::BOLD);
+        Line::from(Span::styled("Copied!", copied_style))
+    } else {
+        let hint = match state {
+            SummarizeState::Done => "j/k: scroll  c: copy  q/Esc: close",
+            SummarizeState::Streaming => "j/k: scroll  c: copy  q/Esc: cancel",
+            SummarizeState::Error => "j/k: scroll  q/Esc: close",
+            _ => "q/Esc: cancel",
+        };
+        Line::from(Span::styled(hint, hint_style))
     };
-    let hint_paragraph = Paragraph::new(Line::from(Span::styled(hint, hint_style))).style(bg);
+    let hint_paragraph = Paragraph::new(hint_line).style(bg);
     frame.render_widget(hint_paragraph, hint_area);
 }
 
