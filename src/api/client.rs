@@ -1,5 +1,5 @@
 use crate::api::file_cache::{CacheHit, FileCache};
-use crate::api::types::{Comment, CommentNode, HnItem, Story};
+use crate::api::types::{ApiBackend, Comment, CommentNode, HnItem, Story, WebItem, WebStory};
 use crate::logging;
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -21,6 +21,7 @@ pub struct DiskCacheConfig {
 #[derive(Clone)]
 pub struct HnClient {
     base_url: String,
+    backend: ApiBackend,
     http: Client,
     cache: Arc<Mutex<LruCache<u64, HnItem>>>,
     file_cache: Option<Arc<FileCache>>,
@@ -39,6 +40,7 @@ const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 impl HnClient {
     pub fn new(
         base_url: String,
+        backend: ApiBackend,
         cache_size: usize,
         concurrency: usize,
         disk_cache: Option<DiskCacheConfig>,
@@ -54,6 +56,7 @@ impl HnClient {
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            backend,
             http: Client::builder()
                 .pool_max_idle_per_host(10)
                 .pool_idle_timeout(Duration::from_secs(30))
@@ -130,6 +133,139 @@ impl HnClient {
         });
     }
 
+    // ── Unified public methods (backend-aware) ──
+
+    /// Fetch initial stories. Returns `(story_ids, stories)`.
+    ///
+    /// - **HackerWeb**: fetches pre-assembled pages (page 1 + page 2 if count > 30).
+    /// - **Firebase**: fetches story IDs then batch-fetches items.
+    pub async fn fetch_initial_stories(&self, count: usize) -> Result<(Vec<u64>, Vec<Story>)> {
+        match self.backend {
+            ApiBackend::HackerWeb => {
+                let mut stories = self.fetch_hackerweb_news(1).await?;
+                if count > 30 && stories.len() == 30 {
+                    let page2 = self.fetch_hackerweb_news(2).await?;
+                    stories.extend(page2);
+                }
+                stories.truncate(count);
+                let ids: Vec<u64> = stories.iter().map(|s| s.id).collect();
+                Ok((ids, stories))
+            }
+            ApiBackend::Firebase => {
+                let story_ids = self.fetch_top_story_ids_force().await?;
+                let ids: Vec<u64> = story_ids.iter().copied().take(count).collect();
+                let stories = self.fetch_stories_batch(&ids).await?;
+                Ok((story_ids, stories))
+            }
+        }
+    }
+
+    /// Fetch more stories beyond what's already loaded.
+    ///
+    /// - **HackerWeb**: computes next page number, fetches it.
+    /// - **Firebase**: uses stored story_ids to batch-fetch the next slice.
+    pub async fn fetch_more_stories(
+        &self,
+        story_ids: &[u64],
+        loaded_count: usize,
+        page_size: usize,
+    ) -> Result<Vec<Story>> {
+        match self.backend {
+            ApiBackend::HackerWeb => {
+                let page = (loaded_count / 30) + 2; // page 1 already loaded, so next is 2, etc.
+                self.fetch_hackerweb_news(page).await
+            }
+            ApiBackend::Firebase => {
+                if loaded_count >= story_ids.len() {
+                    return Ok(vec![]);
+                }
+                let end = (loaded_count + page_size).min(story_ids.len());
+                let ids = &story_ids[loaded_count..end];
+                self.fetch_stories_batch(ids).await
+            }
+        }
+    }
+
+    /// Fetch root-level comments for a story.
+    ///
+    /// - **HackerWeb**: single request to `/item/:id`, returns full nested tree.
+    /// - **Firebase**: recursive item fetches with prefetch depth.
+    pub async fn fetch_comment_roots(&self, story: &Story) -> Result<Vec<CommentNode>> {
+        match self.backend {
+            ApiBackend::HackerWeb => self.fetch_hackerweb_comments(story.id).await,
+            ApiBackend::Firebase => {
+                if story.kids.is_empty() {
+                    return Ok(vec![]);
+                }
+                self.fetch_comment_nodes_prefetch(&story.kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
+                    .await
+            }
+        }
+    }
+
+    /// Fetch children of a comment for lazy expand.
+    ///
+    /// - **HackerWeb**: all children are pre-loaded; returns empty vec as safety fallback.
+    /// - **Firebase**: recursive item fetches.
+    pub async fn fetch_comment_children(
+        &self,
+        ids: &[u64],
+        depth: usize,
+    ) -> Result<Vec<CommentNode>> {
+        match self.backend {
+            ApiBackend::HackerWeb => Ok(vec![]),
+            ApiBackend::Firebase => {
+                if ids.is_empty() {
+                    return Ok(vec![]);
+                }
+                self.fetch_comment_nodes_prefetch(ids, depth, COMMENT_PREFETCH_EXTRA_DEPTH)
+                    .await
+            }
+        }
+    }
+
+    // ── HackerWeb private methods ──
+
+    async fn fetch_hackerweb_news(&self, page: usize) -> Result<Vec<Story>> {
+        let url = format!("{}/news?page={page}", self.base_url);
+        logging::log_info(format!("hackerweb: fetching {url}"));
+        let web_stories: Vec<WebStory> = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("fetch hackerweb news page={page}"))?
+            .error_for_status()
+            .with_context(|| format!("hackerweb news status page={page}"))?
+            .json()
+            .await
+            .with_context(|| format!("decode hackerweb news page={page}"))?;
+        Ok(web_stories.into_iter().map(Story::from).collect())
+    }
+
+    async fn fetch_hackerweb_comments(&self, story_id: u64) -> Result<Vec<CommentNode>> {
+        let url = format!("{}/item/{story_id}", self.base_url);
+        logging::log_info(format!("hackerweb: fetching {url}"));
+        let web_item: WebItem = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("fetch hackerweb item id={story_id}"))?
+            .error_for_status()
+            .with_context(|| format!("hackerweb item status id={story_id}"))?
+            .json()
+            .await
+            .with_context(|| format!("decode hackerweb item id={story_id}"))?;
+        Ok(web_item
+            .comments
+            .into_iter()
+            .map(|c| c.into_comment_node(0))
+            .collect())
+    }
+
+    // ── Firebase-only methods (kept for Firebase backend) ──
+
     pub async fn fetch_item(&self, id: u64) -> Result<HnItem> {
         {
             let mut cache = self.cache.lock().await;
@@ -183,26 +319,6 @@ impl HnClient {
             .into_iter()
             .map(Story::try_from)
             .collect()
-    }
-
-    pub async fn fetch_comment_roots(&self, story: &Story) -> Result<Vec<CommentNode>> {
-        if story.kids.is_empty() {
-            return Ok(vec![]);
-        }
-        self.fetch_comment_nodes_prefetch(&story.kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
-            .await
-    }
-
-    pub async fn fetch_comment_children(
-        &self,
-        ids: &[u64],
-        depth: usize,
-    ) -> Result<Vec<CommentNode>> {
-        if ids.is_empty() {
-            return Ok(vec![]);
-        }
-        self.fetch_comment_nodes_prefetch(ids, depth, COMMENT_PREFETCH_EXTRA_DEPTH)
-            .await
     }
 
     async fn fetch_comment_nodes_prefetch(

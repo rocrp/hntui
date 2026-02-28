@@ -116,6 +116,7 @@ pub struct App {
     comments_generation: u64,
     comments_prefetch_generation: u64,
     pub prefetch_in_flight: bool,
+    pub has_more_stories: bool,
     comment_prefetch_in_flight: HashMap<u64, InFlightPrefetch>,
     prefetched_comments_cache: HashMap<u64, Vec<CommentNode>>,
     prefetch_cache_order: Vec<u64>,
@@ -181,6 +182,7 @@ impl App {
             comments_generation: 0,
             comments_prefetch_generation: 0,
             prefetch_in_flight: false,
+            has_more_stories: true,
             comment_prefetch_in_flight: HashMap::new(),
             prefetched_comments_cache: HashMap::new(),
             prefetch_cache_order: Vec::new(),
@@ -276,6 +278,7 @@ impl App {
         self.last_error = None;
         self.story_loading = true;
         self.prefetch_in_flight = false;
+        self.has_more_stories = true;
         for (_, inflight) in self.comment_prefetch_in_flight.drain() {
             inflight.handle.abort();
         }
@@ -288,15 +291,7 @@ impl App {
         let tx = self.tx.clone();
         let count = self.cli.count;
         tokio::spawn(async move {
-            let res = async {
-                let story_ids = client.fetch_top_story_ids_force().await?;
-                let ids = story_ids.iter().copied().take(count).collect::<Vec<_>>();
-                let stories = client.fetch_stories_batch(&ids).await?;
-                Ok::<_, anyhow::Error>((story_ids, stories))
-            }
-            .await;
-
-            match res {
+            match client.fetch_initial_stories(count).await {
                 Ok((story_ids, stories)) => {
                     let _ = tx.send(AppEvent::StoriesLoaded {
                         generation,
@@ -324,10 +319,10 @@ impl App {
     }
 
     pub fn maybe_prefetch_stories(&mut self) {
-        if self.story_loading || self.prefetch_in_flight {
+        if self.story_loading || self.prefetch_in_flight || !self.has_more_stories {
             return;
         }
-        if self.story_ids.is_empty() || self.stories.is_empty() {
+        if self.stories.is_empty() {
             return;
         }
 
@@ -340,21 +335,17 @@ impl App {
             return;
         }
 
-        let start = loaded;
-        if start >= self.story_ids.len() {
-            return;
-        }
-
-        let end = cmp::min(start + self.cli.page_size, self.story_ids.len());
-        let ids = self.story_ids[start..end].to_vec();
-
         self.prefetch_in_flight = true;
         let generation = self.stories_generation;
         let client = self.client.clone();
         let tx = self.tx.clone();
+        let story_ids = self.story_ids.clone();
+        let page_size = self.cli.page_size;
         tokio::spawn(async move {
-            let res = client.fetch_stories_batch(&ids).await;
-            match res {
+            match client
+                .fetch_more_stories(&story_ids, loaded, page_size)
+                .await
+            {
                 Ok(stories) => {
                     let _ = tx.send(AppEvent::StoriesLoaded {
                         generation,
@@ -785,6 +776,7 @@ impl App {
 
                 match mode {
                     StoriesLoadMode::Replace => {
+                        self.has_more_stories = true;
                         self.stories = stories;
                         self.prefetched_comments_cache.clear();
                         self.prefetch_cache_order.clear();
@@ -800,7 +792,18 @@ impl App {
                         *self.story_list_state.offset_mut() = 0;
                     }
                     StoriesLoadMode::Append => {
-                        self.stories.extend(stories);
+                        if stories.is_empty() {
+                            self.has_more_stories = false;
+                        } else {
+                            // Update story_ids with newly discovered IDs (for HackerWeb backend
+                            // where IDs aren't known upfront).
+                            for s in &stories {
+                                if !self.story_ids.contains(&s.id) {
+                                    self.story_ids.push(s.id);
+                                }
+                            }
+                            self.stories.extend(stories);
+                        }
                     }
                 }
 
@@ -1675,8 +1678,11 @@ pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
         ttl: Duration::from_secs(cli.file_cache_ttl_secs),
     });
 
+    let backend = cli.resolved_backend()?;
+    let base_url = cli.resolved_base_url(backend);
     let client = HnClient::new(
-        cli.base_url.clone(),
+        base_url,
+        backend,
         cli.cache_size,
         cli.concurrency,
         disk_cache,

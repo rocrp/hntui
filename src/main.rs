@@ -7,6 +7,7 @@ mod state;
 mod tui;
 mod ui;
 
+use crate::api::ApiBackend;
 use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
@@ -46,9 +47,13 @@ pub struct Cli {
     #[arg(long, default_value_t = 3600)]
     pub file_cache_ttl_secs: u64,
 
-    /// Hacker News API base URL.
-    #[arg(long, default_value = "https://hacker-news.firebaseio.com/v0")]
-    pub base_url: String,
+    /// API backend: "hackerweb" (default, faster) or "firebase" (official).
+    #[arg(long, default_value = "hackerweb")]
+    pub api_backend: String,
+
+    /// Hacker News API base URL (auto-set from --api-backend if omitted).
+    #[arg(long)]
+    pub base_url: Option<String>,
 
     /// UI config file path (optional; will search defaults).
     #[arg(long)]
@@ -57,6 +62,22 @@ pub struct Cli {
     /// Plugin config file path (optional; will search defaults).
     #[arg(long)]
     pub plugin_config: Option<PathBuf>,
+}
+
+impl Cli {
+    pub fn resolved_backend(&self) -> anyhow::Result<ApiBackend> {
+        self.api_backend.parse()
+    }
+
+    pub fn resolved_base_url(&self, backend: ApiBackend) -> String {
+        if let Some(url) = &self.base_url {
+            return url.clone();
+        }
+        match backend {
+            ApiBackend::HackerWeb => "https://api.hackerwebapp.com".to_string(),
+            ApiBackend::Firebase => "https://hacker-news.firebaseio.com/v0".to_string(),
+        }
+    }
 }
 
 impl Cli {
@@ -69,10 +90,11 @@ impl Cli {
             self.file_cache_ttl_secs > 0,
             "--file-cache-ttl-secs must be > 0"
         );
-        anyhow::ensure!(
-            !self.base_url.trim().is_empty(),
-            "--base-url must be non-empty"
-        );
+        // Validate api_backend parses correctly.
+        self.resolved_backend()?;
+        if let Some(url) = &self.base_url {
+            anyhow::ensure!(!url.trim().is_empty(), "--base-url must be non-empty");
+        }
         if let Some(path) = &self.ui_config {
             anyhow::ensure!(!path.as_os_str().is_empty(), "--ui-config must be non-empty");
         }
