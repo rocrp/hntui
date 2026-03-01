@@ -30,6 +30,9 @@ pub struct SummarizePlugin {
     story_title: String,
     story_url: Option<String>,
     story_id: u64,
+    story_score: i64,
+    story_author: String,
+    story_time: i64,
     http: reqwest::Client,
 }
 
@@ -48,6 +51,9 @@ impl SummarizePlugin {
             story_title: String::new(),
             story_url: None,
             story_id: 0,
+            story_score: 0,
+            story_author: String::new(),
+            story_time: 0,
             http,
         }
     }
@@ -71,6 +77,9 @@ impl SummarizePlugin {
         self.story_title.clear();
         self.story_url = None;
         self.story_id = 0;
+        self.story_score = 0;
+        self.story_author.clear();
+        self.story_time = 0;
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
@@ -122,6 +131,9 @@ impl SummarizePlugin {
         self.story_title = story.title.clone();
         self.story_url = story.url.clone();
         self.story_id = story.id;
+        self.story_score = story.score;
+        self.story_author = story.by.clone();
+        self.story_time = story.time;
 
         let prompt = build_prompt(story, ctx.comment_list, config.max_comments);
         let messages = vec![
@@ -145,15 +157,24 @@ impl SummarizePlugin {
         });
     }
 
-    /// Build clipboard text with metadata header + raw summary markdown.
+    /// Build clipboard text with YAML frontmatter + raw summary markdown.
     fn build_copy_text(&self) -> String {
         let hn_link = format!("https://news.ycombinator.com/item?id={}", self.story_id);
-        let mut out = format!("# {}\n\n", self.story_title);
+        let mut out = String::from("---\n");
+        out.push_str(&format!("title: \"{}\"\n", self.story_title.replace('"', "\\\"")));
         if let Some(url) = &self.story_url {
-            out.push_str(&format!("- Source: {url}\n"));
+            out.push_str(&format!("source: {url}\n"));
         }
-        out.push_str(&format!("- HN: {hn_link}\n"));
-        out.push_str("\n---\n\n");
+        out.push_str(&format!("hn: {hn_link}\n"));
+        out.push_str(&format!("score: {}\n", self.story_score));
+        out.push_str(&format!("author: {}\n", self.story_author));
+        out.push_str(&format!("comments: {}\n", self.comment_count));
+        out.push_str(&format!("model: {}\n", self.model_name));
+        let date = chrono::DateTime::from_timestamp(self.story_time, 0)
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        out.push_str(&format!("date: {date}\n"));
+        out.push_str("---\n\n");
         out.push_str(&self.summary_text);
         out
     }
