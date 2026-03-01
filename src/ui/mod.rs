@@ -7,14 +7,40 @@ pub mod theme;
 
 use crate::app::{App, View};
 use crate::logging;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
 use ratatui::Frame;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const DIM_FACTOR: f64 = 0.6;
+
+/// Widget that dims all cells in the given area by blending toward black.
+struct Dim;
+
+impl Widget for Dim {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let cell = &mut buf[(x, y)];
+                cell.fg = theme::dim_color(cell.fg, DIM_FACTOR);
+                cell.bg = theme::dim_color(cell.bg, DIM_FACTOR);
+            }
+        }
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     match app.view {
         View::Stories => story_list::render(frame, app),
         View::Comments => comment_view::render(frame, app),
     }
+
+    let has_overlay = app.summarize_plugin.is_overlay_visible() || app.help_visible;
+    if has_overlay {
+        frame.render_widget(Dim, frame.area());
+    }
+
     let spinner = app.spinner_frame();
     plugin_overlay::render(frame, &mut app.summarize_plugin, spinner);
     if app.help_visible {

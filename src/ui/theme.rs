@@ -401,6 +401,14 @@ pub(crate) fn story_gradient_fg(
     blend(importance_adjusted, palette().subtext0, dim_factor)
 }
 
+/// Darken a color by blending it toward black. Non-RGB colors get a dark fallback.
+pub(crate) fn dim_color(color: Color, factor: f64) -> Color {
+    match color {
+        Color::Rgb(r, g, b) => blend(Color::Rgb(r, g, b), Color::Rgb(0, 0, 0), factor),
+        _ => Color::Rgb(30, 30, 30),
+    }
+}
+
 pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
     let (ar, ag, ab) = rgb_components(a);
     let (br, bg, bb) = rgb_components(b);
