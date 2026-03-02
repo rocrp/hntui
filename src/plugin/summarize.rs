@@ -195,6 +195,12 @@ impl SummarizePlugin {
         }
     }
 
+    /// Clipboard not available on Android.
+    #[cfg(target_os = "android")]
+    pub fn copy_summary(&mut self) -> bool {
+        false
+    }
+
     pub fn handle_event(&mut self, event: PluginEvent) {
         match event {
             PluginEvent::SummarizeChunk { delta } => {
