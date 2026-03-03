@@ -1135,12 +1135,17 @@ impl App {
         if self.keyword_filter.is_empty() {
             self.visible_story_indices.clear();
         } else {
-            let filter = self.keyword_filter.to_lowercase();
+            let re = regex::RegexBuilder::new(&self.keyword_filter)
+                .case_insensitive(true)
+                .build();
             self.visible_story_indices = self
                 .stories
                 .iter()
                 .enumerate()
-                .filter(|(_, s)| s.title.to_lowercase().contains(&filter))
+                .filter(|(_, s)| match &re {
+                    Ok(re) => re.is_match(&s.title),
+                    Err(_) => s.title.to_lowercase().contains(&self.keyword_filter.to_lowercase()),
+                })
                 .map(|(i, _)| i)
                 .collect();
         }

@@ -181,7 +181,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             ),
             Span::raw("  "),
             Span::styled(
-                "Enter:apply  Esc:clear",
+                if app.keyword_filter.is_empty() { "regex supported  Enter:apply  Esc:clear" } else { "Enter:apply  Esc:clear" },
                 Style::default().fg(theme::palette().subtext0),
             ),
         ])

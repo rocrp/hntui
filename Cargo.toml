@@ -20,6 +20,7 @@ serde_json = "1"
 toml = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 chrono = { version = "0.4.44", default-features = false, features = ["alloc"] }
+regex = "1"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 arboard = "3"
