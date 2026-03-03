@@ -75,18 +75,9 @@ pub enum StoriesLoadMode {
     Append,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PopupFocus {
-    FeedList,
-    FilterInput,
-}
-
 #[derive(Debug, Clone)]
 pub struct FeedFilterPopup {
-    pub focus: PopupFocus,
     pub feed_cursor: usize,
-    pub filter_input: String,
-    prev_filter: String,
 }
 
 const IDLE_PREFETCH_DELAY: Duration = Duration::from_millis(500);
@@ -145,6 +136,7 @@ pub struct App {
     pub feed_filter_popup: Option<FeedFilterPopup>,
     pub keyword_filter: String,
     pub visible_story_indices: Vec<usize>,
+    pub filter_input_active: bool,
 
     pub search_input_active: bool,
     pub search_query: String,
@@ -222,6 +214,7 @@ impl App {
             feed_filter_popup: None,
             keyword_filter: String::new(),
             visible_story_indices: vec![],
+            filter_input_active: false,
 
             search_input_active: false,
             search_query: String::new(),
@@ -654,11 +647,11 @@ impl App {
                     .position(|&f| f == self.current_feed)
                     .unwrap_or(0);
                 self.feed_filter_popup = Some(FeedFilterPopup {
-                    focus: PopupFocus::FeedList,
                     feed_cursor: cursor,
-                    filter_input: self.keyword_filter.clone(),
-                    prev_filter: self.keyword_filter.clone(),
                 });
+            }
+            (View::Stories, Action::OpenFilter) => {
+                self.filter_input_active = true;
             }
             (View::Stories, Action::StartSearch) => {
                 self.search_input_active = true;
@@ -840,6 +833,33 @@ impl App {
 
         if self.feed_filter_popup.is_some() {
             self.handle_feed_filter_key(key);
+            return;
+        }
+
+        if self.filter_input_active {
+            match key.code {
+                KeyCode::Enter => {
+                    self.filter_input_active = false;
+                }
+                KeyCode::Esc => {
+                    self.keyword_filter.clear();
+                    self.filter_input_active = false;
+                    self.recompute_visible_stories();
+                }
+                KeyCode::Backspace => {
+                    self.keyword_filter.pop();
+                    self.recompute_visible_stories();
+                }
+                KeyCode::Char(c) => {
+                    if key.modifiers == KeyModifiers::NONE
+                        || key.modifiers == KeyModifiers::SHIFT
+                    {
+                        self.keyword_filter.push(c);
+                        self.recompute_visible_stories();
+                    }
+                }
+                _ => {}
+            }
             return;
         }
 
@@ -1510,7 +1530,7 @@ impl App {
     }
 
     fn handle_feed_filter_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::{KeyCode, KeyModifiers};
+        use crossterm::event::KeyCode;
 
         let Some(popup) = self.feed_filter_popup.as_mut() else {
             return;
@@ -1518,21 +1538,11 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                // Revert filter
-                self.keyword_filter = popup.prev_filter.clone();
                 self.feed_filter_popup = None;
-                self.recompute_visible_stories();
-            }
-            KeyCode::Tab => {
-                popup.focus = match popup.focus {
-                    PopupFocus::FeedList => PopupFocus::FilterInput,
-                    PopupFocus::FilterInput => PopupFocus::FeedList,
-                };
             }
             KeyCode::Enter => {
                 let selected_feed = FeedKind::ALL[popup.feed_cursor];
                 let feed_changed = selected_feed != self.current_feed;
-                self.keyword_filter = popup.filter_input.clone();
                 self.feed_filter_popup = None;
 
                 if feed_changed {
@@ -1541,34 +1551,16 @@ impl App {
                     }
                     self.current_feed = selected_feed;
                     self.refresh_stories();
+                    self.recompute_visible_stories();
                 }
-                self.recompute_visible_stories();
             }
-            KeyCode::Char('j') | KeyCode::Down
-                if popup.focus == PopupFocus::FeedList =>
-            {
+            KeyCode::Char('j') | KeyCode::Down => {
                 if popup.feed_cursor + 1 < FeedKind::ALL.len() {
                     popup.feed_cursor += 1;
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up
-                if popup.focus == PopupFocus::FeedList =>
-            {
+            KeyCode::Char('k') | KeyCode::Up => {
                 popup.feed_cursor = popup.feed_cursor.saturating_sub(1);
-            }
-            KeyCode::Backspace if popup.focus == PopupFocus::FilterInput => {
-                popup.filter_input.pop();
-                self.keyword_filter = popup.filter_input.clone();
-                self.recompute_visible_stories();
-            }
-            KeyCode::Char(c)
-                if popup.focus == PopupFocus::FilterInput
-                    && (key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT) =>
-            {
-                popup.filter_input.push(c);
-                self.keyword_filter = popup.filter_input.clone();
-                self.recompute_visible_stories();
             }
             _ => {}
         }

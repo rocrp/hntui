@@ -1,5 +1,5 @@
 use crate::api::FeedKind;
-use crate::app::{App, PopupFocus};
+use crate::app::App;
 use crate::ui::theme;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -28,18 +28,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().fg(theme::palette().subtext1);
 
-    let feed_focus = popup.focus == PopupFocus::FeedList;
-    let filter_focus = popup.focus == PopupFocus::FilterInput;
-
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled("Feed & Filter", header_style)));
+    lines.push(Line::from(Span::styled("Feed", header_style)));
     lines.push(Line::raw(""));
 
-    // Section label
-    let feed_label_style = if feed_focus { active_style } else { normal_style };
-    lines.push(Line::from(Span::styled("Feed", feed_label_style)));
-
-    // Feed list
     for (i, &feed) in FeedKind::ALL.iter().enumerate() {
         let is_cursor = i == popup.feed_cursor;
         let is_current = feed == app.current_feed;
@@ -59,38 +51,16 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     lines.push(Line::raw(""));
-
-    // Filter section
-    let filter_label_style = if filter_focus { active_style } else { normal_style };
-    lines.push(Line::from(Span::styled("Filter", filter_label_style)));
-
-    let cursor_char = if filter_focus { "\u{2502}" } else { "" };
-    let filter_line = format!("  [{}{}]", popup.filter_input, cursor_char);
-    let filter_style = if filter_focus { key_style } else { normal_style };
-    lines.push(Line::from(Span::styled(filter_line, filter_style)));
-
-    if !app.keyword_filter.is_empty() {
-        let visible = app.visible_story_count();
-        let total = app.stories.len();
-        lines.push(Line::from(Span::styled(
-            format!("  {visible}/{total} visible"),
-            hint_style,
-        )));
-    }
-
-    lines.push(Line::raw(""));
     lines.push(Line::from(vec![
         Span::styled("j/k", key_style),
         Span::styled(":nav  ", hint_style),
-        Span::styled("Tab", key_style),
-        Span::styled(":switch  ", hint_style),
         Span::styled("Enter", key_style),
-        Span::styled(":apply  ", hint_style),
+        Span::styled(":select  ", hint_style),
         Span::styled("Esc", key_style),
         Span::styled(":close", hint_style),
     ]));
 
-    let desired_width = area.width.min(50);
+    let desired_width = area.width.min(40);
     let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);
     let popup_rect = centered(area, desired_width, desired_height);
 

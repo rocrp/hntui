@@ -76,7 +76,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
     } else if visible_count == 0 && use_filter {
         vec![ListItem::new(Line::from(
-            "No stories match filter. Press f to change.",
+            "No stories match filter. Press F to edit or Esc to clear.",
         ))]
     } else if app.stories.is_empty() {
         vec![ListItem::new(Line::from(
@@ -166,7 +166,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(footer_block, footer_area);
 
     let now = now_unix();
-    let meta = if app.search_input_active {
+    let meta = if app.filter_input_active {
+        let cursor = format!("Filter: {}│", app.keyword_filter);
+        Line::from(vec![
+            Span::styled(
+                cursor,
+                Style::default()
+                    .fg(theme::palette().text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                "Enter:apply  Esc:clear",
+                Style::default().fg(theme::palette().subtext0),
+            ),
+        ])
+    } else if app.search_input_active {
         let cursor = format!("/ {}│", app.search_query);
         Line::from(vec![
             Span::styled(
@@ -221,7 +236,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Line::from("")
     };
 
-    let help = if app.search_input_active || app.search_active {
+    let help = if app.filter_input_active {
+        Line::from("")
+    } else if app.search_input_active || app.search_active {
         Line::from(
             "j/k:nav  Enter/Space/l/→:comments  o:source  /:search  f:feeds  Esc:back to feed  ?:help"
                 .to_string(),
@@ -232,8 +249,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         } else {
             format!("{}/{} loaded", app.stories.len(), app.story_ids.len())
         };
+        let filter_hint = if use_filter { "  F:clear filter" } else { "" };
         Line::from(format!(
-            "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  /:search  f:feeds  r:refresh  ?:help  q:quit    {count_info}"
+            "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  /:search  f:feeds  F:filter  r:refresh  ?:help  q:quit{filter_hint}    {count_info}"
         ))
     };
     let paragraph = Paragraph::new(vec![meta, help]);
