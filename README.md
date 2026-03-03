@@ -1,6 +1,6 @@
 # hntui
 
-Hacker News TUI (top stories + nested comments) using the official Firebase API.
+Hacker News TUI — top stories + nested comments.
 
 ## Screenshots
 
@@ -9,106 +9,99 @@ Hacker News TUI (top stories + nested comments) using the official Firebase API.
 
 ## Install
 
-Homebrew (macOS + Linux Homebrew):
-
 ```bash
+# macOS / Linux Homebrew
 brew install rocrp/tap/hntui
-```
 
-Linux (no Homebrew):
-
-```bash
+# Linux (no Homebrew)
 curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh | bash
 ```
 
-Run: `hntui`
-
 ## Keys
 
-Stories:
-- `j/k` or `↓/↑`: move
-- `gg` / `G`: top / bottom
-- `Ctrl+d` / `Ctrl+u`: page down / up
-- `Enter` / `Space` / `l` / `→`: open comments
-- `o`: open source link in browser
-- `O`: open comments page in browser
-- `r`: refresh
-- `?`: help
-- `q` / `Esc`: quit
+**Stories**
 
-Comments:
-- `j/k` or `↓/↑`: move
-- `gg` / `G`: top / bottom
-- `Ctrl+d` / `Ctrl+u`: page down / up
-- `h` / `←`: collapse selected thread
-- `l` / `→`: expand selected thread (lazy-load children)
-- `Enter` / `c`: toggle collapse/expand
-- `o`: open comments page in browser
-- `O`: open source link in browser
-- `r`: refresh
-- `?`: help
-- `q` / `Esc`: back
+| Key | Action |
+|-----|--------|
+| `j/k`, `↓/↑` | Move |
+| `gg` / `G` | Top / bottom |
+| `Ctrl+d/u` | Page down / up |
+| `Enter`, `Space`, `l`, `→` | Open comments |
+| `o` / `O` | Open source / HN link |
+| `f` | Filter feed |
+| `/` | Search |
+| `s` | Summarize (requires LLM key) |
+| `r` | Refresh |
+| `?` | Help |
+| `q`, `Esc` | Quit |
+
+**Comments**
+
+| Key | Action |
+|-----|--------|
+| `j/k`, `↓/↑` | Move |
+| `gg` / `G` | Top / bottom |
+| `Ctrl+d/u` | Page down / up |
+| `h/l`, `←/→` | Collapse / expand thread |
+| `Enter`, `c` | Toggle collapse |
+| `o` / `O` | Open HN / source link |
+| `r` | Refresh |
+| `q`, `Esc` | Back |
+
+## Themes
+
+Built-in themes via `--theme`:
+
+```bash
+hntui --theme default   # Color (catppuccin frappe)
+hntui --theme eink      # 16-level grayscale for e-ink displays
+```
+
+Without `--theme`, hntui searches for `ui-config.toml` (see below).
 
 ## Configuration
 
-### Config file locations
+### Config search order
 
-hntui searches for config files in this order (first match wins):
+1. Current working directory
+2. `hntui` binary directory
+3. `~/.config/hntui/` (recommended)
 
-1. Current working directory (`./ui-config.toml`, `./plugin-config.toml`)
-2. Directory of the `hntui` binary
-3. `~/.config/hntui/` (recommended for persistent user config)
+Explicit paths: `hntui --ui-config PATH --plugin-config PATH`
 
-To install configs to the standard location:
+### UI (`ui-config.toml`)
+
+Colors, layout, score/comment heat scales. Copy the default as starting point:
 
 ```bash
 mkdir -p ~/.config/hntui
-```
-
-You can also pass paths explicitly:
-
-```
-hntui --ui-config /path/to/ui-config.toml --plugin-config /path/to/plugin-config.toml
-```
-
-### UI customization (`ui-config.toml`)
-
-Controls colors, layout, and score/comment heat scales. Copy the default config as a starting point:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/ui-config.toml \
   -o ~/.config/hntui/ui-config.toml
 ```
 
-Key options:
-
 | Section | Key | Description |
-|---|---|---|
-| `[layout]` | `comment_max_lines` | Max lines per comment (`-1` = no limit) |
+|---------|-----|-------------|
+| `[layout]` | `comment_max_lines` | Max lines per comment (`-1` = unlimited) |
 | `[layout]` | `comment_default_visible_levels` | Depth shown on open (`1` = top-level only) |
 | `[palette]` | color keys | Hex colors for text, backgrounds, accents |
-| `[palette]` | `rainbow` | 10-color list for comment depth + score accents |
+| `[palette]` | `rainbow` | 10-color array for depth + score accents |
 | `[score_scale]` | `steps` | Background color per score threshold |
 | `[comment_scale]` | `steps` | Background color per comment-count threshold |
 
 ### AI summarization (`plugin-config.toml`)
 
-Press `s` on any story to summarize its discussion thread. Requires an LLM API key.
+Press `s` on any story to summarize its discussion. Requires an LLM API key.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/plugin-config.toml \
   -o ~/.config/hntui/plugin-config.toml
 ```
 
-Set your API key via environment variable (preferred):
-
 ```bash
 export HNTUI_LLM_API_KEY="your-key-here"
 ```
 
-Or set `api_key` directly in `plugin-config.toml`.
-
-The default config uses Gemini (`gemini-flash-lite-latest`) via its OpenAI-compatible endpoint. To use OpenAI or any other OpenAI-compatible API, change `api_url` and `model`:
+Or set `api_key` in `plugin-config.toml`. Default uses Gemini (`gemini-flash-lite-latest`). For OpenAI or compatible APIs:
 
 ```toml
 [summarize]
