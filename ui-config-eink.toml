@@ -1,0 +1,64 @@
+# E-ink theme: 16-level grayscale (black #000000 to white #FFFFFF).
+# Designed for e-ink / e-paper displays with limited gray shades.
+# Assumes a light (white) terminal background.
+
+[layout]
+comment_max_lines = -1
+comment_default_visible_levels = 2
+
+[palette]
+# Selected-item highlight background (light gray, subtle on white bg).
+surface2 = "#DDDDDD"
+# Separators, domain text, comment age (medium gray).
+overlay0 = "#999999"
+# Secondary metadata: author, labels (dark-ish for readability).
+subtext0 = "#555555"
+# Hints, story index (slightly lighter).
+subtext1 = "#666666"
+# Primary text (pure black for max contrast).
+text = "#111111"
+# Named accents collapsed to distinct gray levels.
+blue = "#444444"
+sapphire = "#555555"
+sky = "#666666"
+teal = "#777777"
+green = "#333333"
+yellow = "#888888"
+peach = "#666666"
+# Errors: near-black to stand out.
+red = "#222222"
+# Section headings: dark for emphasis.
+mauve = "#333333"
+pink = "#777777"
+
+# Comment depth bands spread across the gray range.
+rainbow = [
+  "#222222",
+  "#333333",
+  "#444444",
+  "#555555",
+  "#666666",
+  "#777777",
+  "#888888",
+  "#999999",
+  "#AAAAAA",
+  "#BBBBBB",
+]
+
+[score_scale]
+steps = [
+  { min = 500, color = "#444444" },
+  { min = 250, color = "#555555" },
+  { min = 100, color = "#777777" },
+  { min = 50, color = "#999999" },
+  { min = 0, color = "#BBBBBB" },
+]
+
+[comment_scale]
+steps = [
+  { min = 300, color = "#444444" },
+  { min = 200, color = "#555555" },
+  { min = 100, color = "#777777" },
+  { min = 50, color = "#999999" },
+  { min = 0, color = "#BBBBBB" },
+]

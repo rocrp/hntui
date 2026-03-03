@@ -55,8 +55,12 @@ pub struct Cli {
     #[arg(long)]
     pub base_url: Option<String>,
 
-    /// UI config file path (optional; will search defaults).
+    /// Built-in theme name: "default", "eink". Conflicts with --ui-config.
     #[arg(long)]
+    pub theme: Option<String>,
+
+    /// UI config file path (optional; will search defaults).
+    #[arg(long, conflicts_with = "theme")]
     pub ui_config: Option<PathBuf>,
 
     /// Plugin config file path (optional; will search defaults).
@@ -160,10 +164,14 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
     logging::init(cli.log_file.clone()).context("init logging")?;
-    let ui_candidates = ui_config_candidates(&cli);
-    let allow_default = cli.ui_config.is_none();
-    ui::theme::init_from_candidates(&ui_candidates, allow_default)
-        .with_context(|| "load ui config")?;
+    if let Some(theme_name) = &cli.theme {
+        ui::theme::init_builtin(theme_name).with_context(|| "load built-in theme")?;
+    } else {
+        let ui_candidates = ui_config_candidates(&cli);
+        let allow_default = cli.ui_config.is_none();
+        ui::theme::init_from_candidates(&ui_candidates, allow_default)
+            .with_context(|| "load ui config")?;
+    }
 
     let plugin_candidates = plugin_config_candidates(&cli);
     let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)

@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 static THEME: OnceLock<Theme> = OnceLock::new();
 const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
+const EINK_UI_CONFIG_TOML: &str = include_str!("../../ui-config-eink.toml");
 const COMMENT_INDENT_BLEND: f64 = 0.35;
 
 #[derive(Debug, Clone)]
@@ -103,6 +104,16 @@ struct ScaleConfig {
 struct ScaleStepConfig {
     min: i64,
     color: String,
+}
+
+/// Initialize from a built-in theme name (e.g. "eink").
+pub(crate) fn init_builtin(name: &str) -> Result<()> {
+    let toml = match name {
+        "default" => DEFAULT_UI_CONFIG_TOML,
+        "eink" => EINK_UI_CONFIG_TOML,
+        _ => return Err(anyhow!("unknown theme: {name}; available: default, eink")),
+    };
+    init_from_str(&format!("built-in theme '{name}'"), toml)
 }
 
 pub(crate) fn init_from_candidates(
