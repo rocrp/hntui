@@ -1912,6 +1912,7 @@ impl App {
             (KeyCode::Enter, _) => popup.start_editing(),
             (KeyCode::Char('s'), KeyModifiers::CONTROL) => self.save_settings(),
             (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+                self.save_settings();
                 self.settings_popup = None;
             }
             _ => {}

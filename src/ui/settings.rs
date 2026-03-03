@@ -100,10 +100,8 @@ pub fn render(frame: &mut Frame, app: &App) {
             Span::styled(":nav  ", hint_style),
             Span::styled("Enter", key_style),
             Span::styled(":edit  ", hint_style),
-            Span::styled("Ctrl+s", key_style),
-            Span::styled(":save  ", hint_style),
-            Span::styled("Esc", key_style),
-            Span::styled(":close", hint_style),
+            Span::styled("Esc/q", key_style),
+            Span::styled(":save & close", hint_style),
         ]));
     }
 
