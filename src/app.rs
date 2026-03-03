@@ -1,7 +1,7 @@
 use crate::api::{CommentNode, DiskCacheConfig, FeedKind, HnClient, SearchClient, Story};
 use crate::input::{Action, KeyState};
 use crate::logging;
-use crate::plugin::config::PluginConfig;
+use crate::plugin::config::{PluginConfig, SummarizeConfig};
 use crate::plugin::summarize::SummarizePlugin;
 use crate::plugin::{PluginContext, PluginEvent};
 use crate::state::StateStore;
@@ -16,6 +16,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::cmp;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -81,6 +82,91 @@ pub struct FeedFilterPopup {
     pub feed_cursor: usize,
 }
 
+pub struct SettingsPopup {
+    pub cursor: usize,
+    pub editing: bool,
+    pub edit_buffer: String,
+    pub api_url: String,
+    pub model: String,
+    pub api_key: String,
+    pub max_comments: String,
+    pub system_prompt: String,
+    pub saved_at: Option<Instant>,
+}
+
+impl SettingsPopup {
+    pub const FIELD_COUNT: usize = 5;
+
+    pub fn from_config(config: &Option<SummarizeConfig>) -> Self {
+        match config {
+            Some(c) => Self {
+                cursor: 0,
+                editing: false,
+                edit_buffer: String::new(),
+                api_url: c.api_url.clone(),
+                model: c.model.clone(),
+                api_key: c.api_key.clone(),
+                max_comments: c.max_comments.to_string(),
+                system_prompt: c.system_prompt.clone(),
+                saved_at: None,
+            },
+            None => Self {
+                cursor: 0,
+                editing: false,
+                edit_buffer: String::new(),
+                api_url: String::new(),
+                model: String::new(),
+                api_key: String::new(),
+                max_comments: "200".to_string(),
+                system_prompt: String::new(),
+                saved_at: None,
+            },
+        }
+    }
+
+    pub fn field_labels(&self) -> [&str; Self::FIELD_COUNT] {
+        ["API URL", "Model", "API Key", "Max Comments", "System Prompt"]
+    }
+
+    pub fn field_values(&self) -> [&str; Self::FIELD_COUNT] {
+        [
+            &self.api_url,
+            &self.model,
+            &self.api_key,
+            &self.max_comments,
+            &self.system_prompt,
+        ]
+    }
+
+    fn field_mut(&mut self, idx: usize) -> &mut String {
+        match idx {
+            0 => &mut self.api_url,
+            1 => &mut self.model,
+            2 => &mut self.api_key,
+            3 => &mut self.max_comments,
+            4 => &mut self.system_prompt,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn start_editing(&mut self) {
+        self.editing = true;
+        self.edit_buffer = self.field_values()[self.cursor].to_string();
+    }
+
+    pub fn confirm_edit(&mut self) {
+        let val = self.edit_buffer.clone();
+        *self.field_mut(self.cursor) = val;
+        self.editing = false;
+        self.edit_buffer.clear();
+    }
+
+    pub fn cancel_edit(&mut self) {
+        self.editing = false;
+        self.edit_buffer.clear();
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct LayoutAreas {
     pub list_area: Rect,
@@ -142,6 +228,8 @@ pub struct App {
 
     pub current_feed: FeedKind,
     pub feed_filter_popup: Option<FeedFilterPopup>,
+    pub settings_popup: Option<SettingsPopup>,
+    pub config_path: Option<PathBuf>,
     pub keyword_filter: String,
     pub visible_story_indices: Vec<usize>,
     pub filter_input_active: bool,
@@ -171,6 +259,7 @@ impl App {
         tx: mpsc::UnboundedSender<AppEvent>,
         state_store: Option<StateStore>,
         plugin_config: Option<PluginConfig>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         let mut story_list_state = ListState::default();
         story_list_state.select(Some(0));
@@ -221,6 +310,8 @@ impl App {
             summarize_plugin,
             current_feed: FeedKind::default(),
             feed_filter_popup: None,
+            settings_popup: None,
+            config_path,
             keyword_filter: String::new(),
             visible_story_indices: vec![],
             filter_input_active: false,
@@ -828,6 +919,11 @@ impl App {
                 self.summarize_plugin.start(&ctx);
             }
 
+            (_, Action::OpenSettings) => {
+                self.settings_popup =
+                    Some(SettingsPopup::from_config(self.summarize_plugin.config()));
+            }
+
             (_, _) => {}
         }
     }
@@ -842,6 +938,11 @@ impl App {
 
         if self.feed_filter_popup.is_some() {
             self.handle_feed_filter_key(key);
+            return;
+        }
+
+        if self.settings_popup.is_some() {
+            self.handle_settings_key(key);
             return;
         }
 
@@ -934,7 +1035,23 @@ impl App {
             return;
         }
 
-        // 3. Feed filter popup
+        // 3. Settings popup — click outside dismisses
+        if self.settings_popup.is_some() {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let frame_area = self.layout_areas.frame_area;
+                let desired_width = frame_area.width.min(60);
+                let line_count = SettingsPopup::FIELD_COUNT + 5; // header + blank + fields + blank + hints
+                let desired_height = (line_count as u16).saturating_add(2).min(frame_area.height);
+                let popup_rect =
+                    crate::ui::centered(frame_area, desired_width, desired_height);
+                if !rect_contains(popup_rect, col, row) {
+                    self.settings_popup = None;
+                }
+            }
+            return;
+        }
+
+        // 4. Feed filter popup
         if self.feed_filter_popup.is_some() {
             let frame_area = self.layout_areas.frame_area;
             // Reconstruct popup rect (matches feed_filter::render logic)
@@ -1757,6 +1874,93 @@ impl App {
         }
     }
 
+    fn handle_settings_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let Some(popup) = self.settings_popup.as_mut() else {
+            return;
+        };
+
+        if popup.editing {
+            match key.code {
+                KeyCode::Enter => popup.confirm_edit(),
+                KeyCode::Esc => popup.cancel_edit(),
+                KeyCode::Backspace => {
+                    popup.edit_buffer.pop();
+                }
+                KeyCode::Char(c) => {
+                    if key.modifiers == KeyModifiers::NONE
+                        || key.modifiers == KeyModifiers::SHIFT
+                    {
+                        popup.edit_buffer.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
+                if popup.cursor + 1 < SettingsPopup::FIELD_COUNT {
+                    popup.cursor += 1;
+                }
+            }
+            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
+                popup.cursor = popup.cursor.saturating_sub(1);
+            }
+            (KeyCode::Enter, _) => popup.start_editing(),
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => self.save_settings(),
+            (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+                self.settings_popup = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn save_settings(&mut self) {
+        let Some(popup) = self.settings_popup.as_mut() else {
+            return;
+        };
+
+        let max_comments = popup.max_comments.parse::<usize>().unwrap_or(200);
+        let system_prompt = if popup.system_prompt.trim().is_empty() {
+            "Summarize this Hacker News discussion concisely. \
+             Highlight key arguments, disagreements, and consensus points."
+                .to_string()
+        } else {
+            popup.system_prompt.clone()
+        };
+
+        let config = SummarizeConfig {
+            api_url: popup.api_url.clone(),
+            model: popup.model.clone(),
+            api_key: popup.api_key.clone(),
+            max_comments,
+            system_prompt,
+        };
+
+        self.summarize_plugin.update_config(Some(config.clone()));
+        popup.saved_at = Some(Instant::now());
+
+        let path = self
+            .config_path
+            .clone()
+            .or_else(crate::plugin::config::default_config_path);
+        if let Some(path) = path {
+            let plugin_config = PluginConfig {
+                summarize: Some(config),
+            };
+            tokio::spawn(async move {
+                if let Err(err) =
+                    crate::plugin::config::save_plugin_config(&path, &plugin_config).await
+                {
+                    logging::log_error(format!("failed to save config: {err:#}"));
+                }
+            });
+        }
+    }
+
     fn exit_search_mode(&mut self) {
         self.search_active = false;
         self.search_input_active = false;
@@ -2143,7 +2347,11 @@ fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
         && row < rect.y + rect.height
 }
 
-pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
+pub async fn run(
+    cli: Cli,
+    plugin_config: Option<PluginConfig>,
+    config_path: Option<PathBuf>,
+) -> Result<()> {
     let cache_dir = if cli.no_file_cache {
         None
     } else {
@@ -2174,7 +2382,14 @@ pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
-    let mut app = App::new(cli, client, tx.clone(), state_store.clone(), plugin_config);
+    let mut app = App::new(
+        cli,
+        client,
+        tx.clone(),
+        state_store.clone(),
+        plugin_config,
+        config_path,
+    );
 
     if let Some(store) = &state_store {
         if let Some(state) = store.load_story_list_state().await? {

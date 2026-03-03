@@ -58,6 +58,14 @@ impl SummarizePlugin {
         }
     }
 
+    pub fn config(&self) -> &Option<SummarizeConfig> {
+        &self.config
+    }
+
+    pub fn update_config(&mut self, config: Option<SummarizeConfig>) {
+        self.config = config;
+    }
+
     pub fn state(&self) -> SummarizeState {
         self.state
     }
@@ -94,7 +102,7 @@ impl SummarizePlugin {
         let Some(config) = &self.config else {
             self.state = SummarizeState::Error;
             self.error = Some(
-                "LLM not configured. Create plugin-config.toml or set HNTUI_LLM_API_KEY"
+                "LLM not configured. Press , for settings or set HNTUI_LLM_API_KEY"
                     .to_string(),
             );
             return;
@@ -103,7 +111,7 @@ impl SummarizePlugin {
         let Some(api_key) = config.resolve_api_key() else {
             self.state = SummarizeState::Error;
             self.error = Some(
-                "API key not set. Set HNTUI_LLM_API_KEY env var or api_key in plugin-config.toml"
+                "API key not set. Press , for settings or set HNTUI_LLM_API_KEY env var"
                     .to_string(),
             );
             return;

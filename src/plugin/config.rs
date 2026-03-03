@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PluginConfig {
     pub summarize: Option<SummarizeConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SummarizeConfig {
     pub api_url: String,
     pub model: String,
@@ -42,6 +42,32 @@ impl SummarizeConfig {
         }
         None
     }
+}
+
+pub fn default_config_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".config/hntui/config.toml"))
+}
+
+pub async fn save_plugin_config(path: &Path, config: &PluginConfig) -> Result<()> {
+    let contents = toml::to_string_pretty(config).context("serialize plugin config")?;
+    let parent = path.parent().context("config path has no parent dir")?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .with_context(|| format!("create dir {}", parent.display()))?;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system time")?
+        .as_nanos();
+    let tmp = path.with_extension(format!("toml.tmp.{}.{unique}", std::process::id()));
+    tokio::fs::write(&tmp, contents.as_bytes())
+        .await
+        .with_context(|| format!("write temp {}", tmp.display()))?;
+    tokio::fs::rename(&tmp, path)
+        .await
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
+    Ok(())
 }
 
 pub fn load_plugin_config(candidates: &[PathBuf]) -> Result<Option<PluginConfig>> {

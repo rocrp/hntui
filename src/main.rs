@@ -156,7 +156,27 @@ fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
 }
 
 fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
-    config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml")
+    if cli.plugin_config.is_some() {
+        return config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml");
+    }
+    // Search config.toml first, then legacy plugin-config.toml for migration
+    let mut candidates = config_candidates(None, "config.toml");
+    candidates.extend(config_candidates(None, "plugin-config.toml"));
+    candidates
+}
+
+/// Resolve path to write config to: CLI override → first existing candidate → default XDG path.
+fn resolve_config_save_path(cli: &Cli) -> Option<PathBuf> {
+    if let Some(path) = &cli.plugin_config {
+        return Some(path.clone());
+    }
+    let candidates = config_candidates(None, "config.toml");
+    for c in &candidates {
+        if c.exists() {
+            return Some(c.clone());
+        }
+    }
+    plugin::config::default_config_path()
 }
 
 #[tokio::main]
@@ -176,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
     let plugin_candidates = plugin_config_candidates(&cli);
     let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)
         .with_context(|| "load plugin config")?;
+    let config_path = resolve_config_save_path(&cli);
 
-    app::run(cli, plugin_config).await
+    app::run(cli, plugin_config, config_path).await
 }

@@ -3,6 +3,7 @@ pub mod feed_filter;
 pub mod help;
 pub mod markdown;
 pub mod plugin_overlay;
+pub mod settings;
 pub mod story_list;
 pub mod theme;
 
@@ -39,7 +40,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let has_overlay = app.summarize_plugin.is_overlay_visible()
         || app.help_visible
-        || app.feed_filter_popup.is_some();
+        || app.feed_filter_popup.is_some()
+        || app.settings_popup.is_some();
     if has_overlay {
         frame.render_widget(Dim, frame.area());
     }
@@ -48,6 +50,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     plugin_overlay::render(frame, &mut app.summarize_plugin, spinner);
     if app.feed_filter_popup.is_some() {
         feed_filter::render(frame, app);
+    }
+    if app.settings_popup.is_some() {
+        settings::render(frame, app);
     }
     if app.help_visible {
         help::render(frame, app);
