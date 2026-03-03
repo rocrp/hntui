@@ -1,6 +1,6 @@
 use crate::plugin::summarize::{SummarizePlugin, SummarizeState};
 use crate::ui::{markdown, theme};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -18,7 +18,7 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
 
     let popup_w = (area.width * 4 / 5).max(30);
     let popup_h = (area.height * 4 / 5).max(10);
-    let popup = centered(area, popup_w, popup_h);
+    let popup = super::centered(area, popup_w, popup_h);
 
     let header_style = Style::default()
         .fg(theme::palette().mauve)
@@ -117,19 +117,4 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     };
     let hint_paragraph = Paragraph::new(hint_line).style(bg);
     frame.render_widget(hint_paragraph, hint_area);
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width);
-    let height = height.min(area.height);
-    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
-    let y = area
-        .y
-        .saturating_add(area.height.saturating_sub(height) / 2);
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
 }

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, LayoutAreas};
 use crate::ui::theme;
 use crate::ui::{format_age, format_error, now_unix};
 use html_escape::decode_html_entities;
@@ -31,6 +31,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
+    app.layout_areas = LayoutAreas { list_area, frame_area: area };
     let layout = theme::layout();
     let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
     let content_width = list_area.width as usize;

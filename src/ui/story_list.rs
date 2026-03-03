@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, LayoutAreas};
 use crate::ui::theme;
 use crate::ui::{domain_from_url, format_age, format_error, now_unix};
 use html_escape::decode_html_entities;
@@ -49,6 +49,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
+    app.layout_areas = LayoutAreas { list_area, frame_area: area };
     app.story_page_size = (list_area.height as usize).max(1);
     app.maybe_prefetch_stories();
 
@@ -181,7 +182,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             ),
             Span::raw("  "),
             Span::styled(
-                if app.keyword_filter.is_empty() { "regex supported  Enter:apply  Esc:clear" } else { "Enter:apply  Esc:clear" },
+                if app.keyword_filter.is_empty() {
+                    "regex supported  Enter:apply  Esc:clear"
+                } else {
+                    "Enter:apply  Esc:clear"
+                },
                 Style::default().fg(theme::palette().subtext0),
             ),
         ])

@@ -48,6 +48,16 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `r` | Refresh |
 | `q`, `Esc` | Back |
 
+**Touch / Mouse** (Termux, etc.)
+
+| Gesture | Action |
+|---------|--------|
+| Tap item | Select it |
+| Tap selected item | Open comments / toggle collapse |
+| Scroll up/down | Move selection |
+| Tap title bar (comments) | Go back |
+| Tap outside popup | Dismiss |
+
 ## Themes
 
 Built-in themes via `--theme`:

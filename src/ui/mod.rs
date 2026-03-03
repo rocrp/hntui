@@ -91,6 +91,21 @@ pub(crate) fn domain_from_url(url: &str) -> Option<String> {
     Some(host_port.trim_start_matches("www.").to_string())
 }
 
+pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height) / 2);
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 pub(crate) fn format_error(err: &str) -> String {
     let mut out = String::from(err);
     if let Some(tip) = error_tip(err) {

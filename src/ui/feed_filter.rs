@@ -1,7 +1,6 @@
 use crate::api::FeedKind;
 use crate::app::App;
 use crate::ui::theme;
-use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -62,7 +61,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let desired_width = area.width.min(40);
     let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);
-    let popup_rect = centered(area, desired_width, desired_height);
+    let popup_rect = super::centered(area, desired_width, desired_height);
 
     frame.render_widget(Clear, popup_rect);
     let block = Block::default()
@@ -73,19 +72,4 @@ pub fn render(frame: &mut Frame, app: &App) {
         .block(block)
         .style(Style::default().bg(theme::palette().surface2));
     frame.render_widget(paragraph, popup_rect);
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width);
-    let height = height.min(area.height);
-    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
-    let y = area
-        .y
-        .saturating_add(area.height.saturating_sub(height) / 2);
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
 }

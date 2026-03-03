@@ -12,6 +12,7 @@ use crate::Cli;
 use anyhow::{Context, Result};
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::cmp;
 use std::collections::HashMap;
@@ -80,6 +81,12 @@ pub struct FeedFilterPopup {
     pub feed_cursor: usize,
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct LayoutAreas {
+    pub list_area: Rect,
+    pub frame_area: Rect,
+}
+
 const IDLE_PREFETCH_DELAY: Duration = Duration::from_millis(500);
 const MAX_COMMENT_PREFETCH_IN_FLIGHT: usize = 3;
 const PREFETCH_CACHE_CAP: usize = 20;
@@ -115,6 +122,7 @@ pub struct App {
     pub comment_line_offset: usize,
 
     pub last_error: Option<String>,
+    pub layout_areas: LayoutAreas,
 
     client: HnClient,
     cli: Cli,
@@ -194,6 +202,7 @@ impl App {
             comment_line_offset: 0,
 
             last_error: None,
+            layout_areas: LayoutAreas::default(),
 
             client,
             cli,
@@ -884,6 +893,183 @@ impl App {
 
         if let Some(action) = self.input.on_key(key) {
             self.handle_action(action);
+        }
+    }
+
+    pub fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+
+        self.last_user_activity = Instant::now();
+        let col = mouse.column;
+        let row = mouse.row;
+
+        // 1. Help visible → any click dismisses
+        if self.help_visible {
+            if matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+            ) {
+                self.help_visible = false;
+            }
+            return;
+        }
+
+        // 2. Plugin overlay (summarize) visible
+        if self.summarize_plugin.is_overlay_visible() {
+            let frame_area = self.layout_areas.frame_area;
+            let popup_w = (frame_area.width * 4 / 5).max(30);
+            let popup_h = (frame_area.height * 4 / 5).max(10);
+            let popup = crate::ui::centered(frame_area, popup_w, popup_h);
+
+            match mouse.kind {
+                MouseEventKind::ScrollDown => self.summarize_plugin.scroll_down(3),
+                MouseEventKind::ScrollUp => self.summarize_plugin.scroll_up(3),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if !rect_contains(popup, col, row) {
+                        self.summarize_plugin.dismiss();
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // 3. Feed filter popup
+        if self.feed_filter_popup.is_some() {
+            let frame_area = self.layout_areas.frame_area;
+            // Reconstruct popup rect (matches feed_filter::render logic)
+            let line_count = FeedKind::ALL.len() + 4; // header + blank + items + blank + hint
+            let desired_width = frame_area.width.min(40);
+            let desired_height = (line_count as u16).saturating_add(2).min(frame_area.height);
+            let popup_rect = crate::ui::centered(frame_area, desired_width, desired_height);
+
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if !rect_contains(popup_rect, col, row) {
+                        self.feed_filter_popup = None;
+                    } else {
+                        // Inner area (inside border)
+                        let inner_y = popup_rect.y + 1; // border
+                        let item_start_y = inner_y + 2; // header line + blank line
+                        if row >= item_start_y && row < item_start_y + FeedKind::ALL.len() as u16 {
+                            let idx = (row - item_start_y) as usize;
+                            // Tap = select + confirm
+                            let selected_feed = FeedKind::ALL[idx];
+                            let feed_changed = selected_feed != self.current_feed;
+                            self.feed_filter_popup = None;
+                            if feed_changed {
+                                if self.search_active {
+                                    self.exit_search_mode();
+                                }
+                                self.current_feed = selected_feed;
+                                self.refresh_stories();
+                                self.recompute_visible_stories();
+                            }
+                        }
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    let popup = self.feed_filter_popup.as_mut().unwrap();
+                    if popup.feed_cursor + 1 < FeedKind::ALL.len() {
+                        popup.feed_cursor += 1;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    let popup = self.feed_filter_popup.as_mut().unwrap();
+                    popup.feed_cursor = popup.feed_cursor.saturating_sub(1);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // 4. Scroll events → move selection
+        match mouse.kind {
+            MouseEventKind::ScrollDown => {
+                self.handle_action(Action::MoveDown);
+                return;
+            }
+            MouseEventKind::ScrollUp => {
+                self.handle_action(Action::MoveUp);
+                return;
+            }
+            _ => {}
+        }
+
+        // 5. Only handle left clicks from here; ignore during text input
+        let MouseEventKind::Down(MouseButton::Left) = mouse.kind else {
+            return;
+        };
+        if self.filter_input_active || self.search_input_active {
+            return;
+        }
+
+        let list_area = self.layout_areas.list_area;
+
+        // 6. Stories view
+        if self.view == View::Stories {
+            if !rect_contains(list_area, col, row) {
+                return;
+            }
+            let offset = self.story_list_state.offset();
+            let click_idx = offset + (row - list_area.y) as usize;
+            let count = self.visible_story_count();
+            if click_idx >= count {
+                return;
+            }
+            let current = self.story_list_state.selected().unwrap_or(0);
+            if click_idx == current {
+                self.open_comments_for_selected_story();
+            } else {
+                self.story_list_state.select(Some(click_idx));
+                ensure_visible(
+                    &mut self.story_list_state,
+                    count,
+                    self.story_page_size,
+                );
+                self.maybe_prefetch_comments();
+            }
+            return;
+        }
+
+        // 7. Comments view
+        if self.view == View::Comments {
+            // Tap title bar (above list_area) → go back
+            if row < list_area.y {
+                self.handle_action(Action::BackOrQuit);
+                return;
+            }
+            if !rect_contains(list_area, col, row) {
+                return;
+            }
+            // Walk cumulative heights to find which comment was clicked
+            let click_line = self.comment_line_offset + (row - list_area.y) as usize;
+            let mut cumulative = 0usize;
+            let mut target_idx = None;
+            for (idx, &h) in self.comment_item_heights.iter().enumerate() {
+                let next = cumulative + h.max(1);
+                if click_line < next {
+                    target_idx = Some(idx);
+                    break;
+                }
+                cumulative = next;
+            }
+            let Some(idx) = target_idx else {
+                return;
+            };
+            let current = self.comment_list_state.selected().unwrap_or(0);
+            if idx == current {
+                self.toggle_selected_comment_collapse();
+            } else {
+                self.comment_list_state.select(Some(idx));
+                ensure_comment_visible(
+                    &mut self.comment_list_state,
+                    &mut self.comment_line_offset,
+                    self.comment_list.len(),
+                    &self.comment_item_heights,
+                    self.comment_viewport_height,
+                );
+            }
         }
     }
 
@@ -1950,6 +2136,13 @@ fn page_up_comment_list(
     }
 }
 
+fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x
+        && col < rect.x + rect.width
+        && row >= rect.y
+        && row < rect.y + rect.height
+}
+
 pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
     let cache_dir = if cli.no_file_cache {
         None
@@ -2013,6 +2206,7 @@ pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
                 let event = event.context("read terminal event")?;
                 match event {
                     Event::Key(key) => app.handle_key(key),
+                    Event::Mouse(mouse) => app.handle_mouse(mouse),
                     Event::Resize(_, _) => {}
                     _ => {}
                 }
