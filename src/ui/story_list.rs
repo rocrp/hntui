@@ -94,6 +94,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let story = &app.stories[story_idx];
                 (
                     idx,
+                    story_idx,
                     story.id,
                     story.title.clone(),
                     story.url.clone(),
@@ -106,51 +107,54 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         story_data
             .into_iter()
-            .map(|(idx, _id, title, url, score, comment_count, prefetching)| {
-                let domain = url
-                    .as_deref()
-                    .and_then(domain_from_url)
-                    .unwrap_or_else(|| "self".to_string());
-                let title = decode_html_entities(&title).into_owned();
+            .map(
+                |(idx, story_idx, _id, title, url, score, comment_count, prefetching)| {
+                    let domain = url
+                        .as_deref()
+                        .and_then(domain_from_url)
+                        .unwrap_or_else(|| "self".to_string());
+                    let title = decode_html_entities(&title).into_owned();
 
-                let score_level = theme::score_level(score);
-                let comment_level = theme::comment_level(comment_count);
-                let weighted = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
-                let importance = bucket_importance(weighted);
+                    let score_level = theme::score_level(score);
+                    let comment_level = theme::comment_level(comment_count);
+                    let weighted = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
+                    let importance = bucket_importance(weighted);
 
-                let distance = idx.abs_diff(selected);
-                let fg = theme::story_gradient_fg(idx, importance, distance, half_viewport);
+                    let distance = idx.abs_diff(selected);
+                    let fg = theme::story_gradient_fg(idx, importance, distance, half_viewport);
 
-                let mut base_style = Style::default().fg(fg);
-                if importance >= 0.9 {
-                    base_style = base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-                } else if importance >= 0.75 {
-                    base_style = base_style.add_modifier(Modifier::BOLD);
-                }
+                    let mut base_style = Style::default().fg(fg);
+                    if importance >= 0.9 {
+                        base_style = base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                    } else if importance >= 0.75 {
+                        base_style = base_style.add_modifier(Modifier::BOLD);
+                    }
 
-                let mut spans = vec![
-                    Span::styled(format!("{:>2}. ", idx + 1), base_style),
-                    Span::styled(title, base_style),
-                    Span::styled(
-                        format!(" ({domain})"),
-                        base_style.add_modifier(Modifier::ITALIC),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(format!("{}", score), base_style),
-                    Span::styled("·", base_style),
-                    Span::styled(format!("{}", comment_count), base_style),
-                ];
+                    let display_num = story_idx + 1;
+                    let mut spans = vec![
+                        Span::styled(format!("{:>2}. ", display_num), base_style),
+                        Span::styled(title, base_style),
+                        Span::styled(
+                            format!(" ({domain})"),
+                            base_style.add_modifier(Modifier::ITALIC),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(format!("{}", score), base_style),
+                        Span::styled("·", base_style),
+                        Span::styled(format!("{}", comment_count), base_style),
+                    ];
 
-                if prefetching {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        spinner.to_string(),
-                        base_style.add_modifier(Modifier::DIM),
-                    ));
-                }
+                    if prefetching {
+                        spans.push(Span::raw("  "));
+                        spans.push(Span::styled(
+                            spinner.to_string(),
+                            base_style.add_modifier(Modifier::DIM),
+                        ));
+                    }
 
-                ListItem::new(Line::from(spans))
-            })
+                    ListItem::new(Line::from(spans))
+                },
+            )
             .collect::<Vec<_>>()
     };
 
@@ -245,7 +249,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         )
     } else {
         let count_info = if use_filter {
-            format!("{}/{} visible  {}/{} loaded", visible_count, app.stories.len(), app.stories.len(), app.story_ids.len())
+            format!(
+                "{}/{} visible  {}/{} loaded",
+                visible_count,
+                app.stories.len(),
+                app.stories.len(),
+                app.story_ids.len()
+            )
         } else {
             format!("{}/{} loaded", app.stories.len(), app.story_ids.len())
         };
