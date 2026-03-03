@@ -19,6 +19,7 @@ pub enum Action {
     ToggleCollapse,
     Refresh,
     Summarize,
+    StartSearch,
 }
 
 #[derive(Debug, Default)]
@@ -70,6 +71,7 @@ impl KeyState {
                     (KeyCode::Char('c'), KeyModifiers::NONE) => Some(Action::ToggleCollapse),
                     (KeyCode::Char('r'), KeyModifiers::NONE) => Some(Action::Refresh),
                     (KeyCode::Char('s'), KeyModifiers::NONE) => Some(Action::Summarize),
+                    (KeyCode::Char('/'), _) => Some(Action::StartSearch),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::BackOrQuit),
                     _ => None,
                 }

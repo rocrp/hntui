@@ -12,7 +12,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     let spinner = app.spinner_frame();
-    let title = if app.story_loading && app.stories.is_empty() {
+    let title = if app.search_active {
+        let n = app.stories.len();
+        let q = &app.search_query;
+        if app.story_loading {
+            format!("Search: {q} (loading {spinner})")
+        } else {
+            format!("Search: {q} ({n} results)")
+        }
+    } else if app.story_loading && app.stories.is_empty() {
         format!("Hacker News (loading {spinner})")
     } else if app.story_loading {
         format!("Hacker News (refreshing {spinner})")
@@ -132,7 +140,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(footer_block, footer_area);
 
     let now = now_unix();
-    let meta = if let Some(err) = app.last_error.as_deref() {
+    let meta = if app.search_input_active {
+        let cursor = format!("/ {}│", app.search_query);
+        Line::from(vec![
+            Span::styled(
+                cursor,
+                Style::default()
+                    .fg(theme::palette().text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                "Enter:search  Esc:cancel",
+                Style::default().fg(theme::palette().subtext0),
+            ),
+        ])
+    } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
             Style::default().fg(theme::palette().red),
@@ -172,11 +195,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Line::from("")
     };
 
-    let help = Line::from(format!(
-        "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  r:refresh  ?:help  q:quit    {}/{} loaded",
-        app.stories.len(),
-        app.story_ids.len()
-    ));
+    let help = if app.search_input_active || app.search_active {
+        Line::from(format!(
+            "j/k:nav  Enter/Space/l/→:comments  o:source  /:search  Esc:back to feed  ?:help"
+        ))
+    } else {
+        Line::from(format!(
+            "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  /:search  r:refresh  ?:help  q:quit    {}/{} loaded",
+            app.stories.len(),
+            app.story_ids.len()
+        ))
+    };
     let paragraph = Paragraph::new(vec![meta, help]);
     frame.render_widget(paragraph, footer_inner);
 }

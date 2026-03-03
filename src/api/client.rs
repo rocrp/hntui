@@ -194,10 +194,17 @@ impl HnClient {
         match self.backend {
             ApiBackend::HackerWeb => self.fetch_hackerweb_comments(story.id).await,
             ApiBackend::Firebase => {
-                if story.kids.is_empty() {
+                let kids = if story.kids.is_empty() && story.comment_count > 0 {
+                    // Search results don't include kids — fetch the item to get them.
+                    let item = self.fetch_item(story.id).await?;
+                    item.kids.unwrap_or_default()
+                } else {
+                    story.kids.clone()
+                };
+                if kids.is_empty() {
                     return Ok(vec![]);
                 }
-                self.fetch_comment_nodes_prefetch(&story.kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
+                self.fetch_comment_nodes_prefetch(&kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
                     .await
             }
         }

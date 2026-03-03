@@ -1,4 +1,4 @@
-use crate::api::{CommentNode, DiskCacheConfig, HnClient, Story};
+use crate::api::{CommentNode, DiskCacheConfig, HnClient, SearchClient, Story};
 use crate::input::{Action, KeyState};
 use crate::logging;
 use crate::plugin::config::PluginConfig;
@@ -52,6 +52,10 @@ pub enum AppEvent {
         generation: u64,
         parent_id: u64,
         message: String,
+    },
+    SearchResultsLoaded {
+        generation: u64,
+        stories: Vec<Story>,
     },
     PluginEvent(PluginEvent),
     Error {
@@ -123,6 +127,13 @@ pub struct App {
     awaiting_prefetch_story_id: Option<u64>,
     pub summarize_plugin: SummarizePlugin,
 
+    pub search_input_active: bool,
+    pub search_query: String,
+    pub search_active: bool,
+    search_generation: u64,
+    search_client: SearchClient,
+    saved_stories: Option<(Vec<Story>, Vec<u64>, bool)>,
+
     input: KeyState,
     should_quit: bool,
     spinner_idx: usize,
@@ -188,6 +199,12 @@ impl App {
             prefetch_cache_order: Vec::new(),
             awaiting_prefetch_story_id: None,
             summarize_plugin,
+            search_input_active: false,
+            search_query: String::new(),
+            search_active: false,
+            search_generation: 0,
+            search_client: SearchClient::new(reqwest::Client::new()),
+            saved_stories: None,
             input: KeyState::default(),
             should_quit: false,
             spinner_idx: 0,
@@ -240,6 +257,9 @@ impl App {
     }
 
     fn save_story_list_state_background(&self) {
+        if self.search_active {
+            return;
+        }
         let Some(store) = self.state_store.clone() else {
             return;
         };
@@ -319,6 +339,9 @@ impl App {
     }
 
     pub fn maybe_prefetch_stories(&mut self) {
+        if self.search_active {
+            return;
+        }
         if self.story_loading || self.prefetch_in_flight || !self.has_more_stories {
             return;
         }
@@ -581,10 +604,20 @@ impl App {
         }
 
         match (self.view, action) {
+            (View::Stories, Action::BackOrQuit) if self.search_active => {
+                self.exit_search_mode();
+            }
             (View::Stories, Action::BackOrQuit) => self.should_quit = true,
             (View::Comments, Action::BackOrQuit) => {
                 self.view = View::Stories;
                 self.maybe_prefetch_comments();
+            }
+            (View::Stories, Action::StartSearch) => {
+                self.search_input_active = true;
+                self.search_query.clear();
+            }
+            (View::Stories, Action::Refresh) if self.search_active => {
+                self.submit_search();
             }
             (View::Stories, Action::Refresh) => self.refresh_stories(),
             (View::Comments, Action::Refresh) => self.refresh_comments(),
@@ -746,10 +779,32 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
         if key.kind == KeyEventKind::Release {
             return;
         }
         self.last_user_activity = Instant::now();
+
+        if self.search_input_active {
+            match key.code {
+                KeyCode::Enter => self.submit_search(),
+                KeyCode::Esc => self.cancel_search(),
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    if key.modifiers == KeyModifiers::NONE
+                        || key.modifiers == KeyModifiers::SHIFT
+                    {
+                        self.search_query.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if let Some(action) = self.input.on_key(key) {
             self.handle_action(action);
         }
@@ -921,6 +976,21 @@ impl App {
                 ));
                 self.last_error = Some(message);
                 self.rebuild_comment_list(Some(parent_id));
+            }
+            AppEvent::SearchResultsLoaded {
+                generation,
+                stories,
+            } => {
+                if generation != self.search_generation {
+                    return;
+                }
+                self.story_loading = false;
+                self.last_error = None;
+                self.stories = stories;
+                self.story_ids = self.stories.iter().map(|s| s.id).collect();
+                self.has_more_stories = false;
+                self.story_list_state.select(Some(0));
+                *self.story_list_state.offset_mut() = 0;
             }
             AppEvent::PluginEvent(event) => {
                 self.summarize_plugin.handle_event(event);
@@ -1291,6 +1361,66 @@ impl App {
             self.expand_selected_comment();
         } else {
             self.collapse_selected_comment();
+        }
+    }
+
+    fn submit_search(&mut self) {
+        self.search_input_active = false;
+        let query = self.search_query.trim().to_string();
+        if query.is_empty() {
+            return;
+        }
+
+        if !self.search_active {
+            self.saved_stories = Some((
+                self.stories.clone(),
+                self.story_ids.clone(),
+                self.has_more_stories,
+            ));
+        }
+
+        self.search_active = true;
+        self.story_loading = true;
+        self.last_error = None;
+        self.search_generation = self.search_generation.wrapping_add(1);
+        let generation = self.search_generation;
+
+        let client = self.search_client.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            match client.search_stories(&query, 0).await {
+                Ok((stories, _has_more)) => {
+                    let _ = tx.send(AppEvent::SearchResultsLoaded {
+                        generation,
+                        stories,
+                    });
+                }
+                Err(err) => {
+                    let _ = tx.send(AppEvent::Error {
+                        generation,
+                        message: format!("{err:#}"),
+                    });
+                }
+            }
+        });
+    }
+
+    fn cancel_search(&mut self) {
+        self.search_input_active = false;
+        self.search_query.clear();
+    }
+
+    fn exit_search_mode(&mut self) {
+        self.search_active = false;
+        self.search_input_active = false;
+        self.search_query.clear();
+
+        if let Some((stories, story_ids, has_more)) = self.saved_stories.take() {
+            self.stories = stories;
+            self.story_ids = story_ids;
+            self.has_more_stories = has_more;
+            self.story_list_state.select(Some(0));
+            *self.story_list_state.offset_mut() = 0;
         }
     }
 }
