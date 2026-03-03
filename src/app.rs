@@ -1,4 +1,4 @@
-use crate::api::{CommentNode, DiskCacheConfig, HnClient, SearchClient, Story};
+use crate::api::{CommentNode, DiskCacheConfig, FeedKind, HnClient, SearchClient, Story};
 use crate::input::{Action, KeyState};
 use crate::logging;
 use crate::plugin::config::PluginConfig;
@@ -75,6 +75,20 @@ pub enum StoriesLoadMode {
     Append,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupFocus {
+    FeedList,
+    FilterInput,
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedFilterPopup {
+    pub focus: PopupFocus,
+    pub feed_cursor: usize,
+    pub filter_input: String,
+    prev_filter: String,
+}
+
 const IDLE_PREFETCH_DELAY: Duration = Duration::from_millis(500);
 const MAX_COMMENT_PREFETCH_IN_FLIGHT: usize = 3;
 const PREFETCH_CACHE_CAP: usize = 20;
@@ -126,6 +140,11 @@ pub struct App {
     prefetch_cache_order: Vec<u64>,
     awaiting_prefetch_story_id: Option<u64>,
     pub summarize_plugin: SummarizePlugin,
+
+    pub current_feed: FeedKind,
+    pub feed_filter_popup: Option<FeedFilterPopup>,
+    pub keyword_filter: String,
+    pub visible_story_indices: Vec<usize>,
 
     pub search_input_active: bool,
     pub search_query: String,
@@ -199,6 +218,11 @@ impl App {
             prefetch_cache_order: Vec::new(),
             awaiting_prefetch_story_id: None,
             summarize_plugin,
+            current_feed: FeedKind::default(),
+            feed_filter_popup: None,
+            keyword_filter: String::new(),
+            visible_story_indices: vec![],
+
             search_input_active: false,
             search_query: String::new(),
             search_active: false,
@@ -242,18 +266,27 @@ impl App {
             )
     }
 
-    pub fn restore_story_list_state(&mut self, story_ids: Vec<u64>, stories: Vec<Story>) {
+    pub fn restore_story_list_state(
+        &mut self,
+        story_ids: Vec<u64>,
+        stories: Vec<Story>,
+        feed: Option<FeedKind>,
+    ) {
         if story_ids.is_empty() || stories.is_empty() {
             self.last_error = Some("refusing to restore empty story list state".to_string());
             return;
         }
 
+        if let Some(f) = feed {
+            self.current_feed = f;
+        }
         self.story_ids = story_ids;
         self.stories = stories;
         self.story_loading = false;
         self.prefetch_in_flight = false;
         self.story_list_state.select(Some(0));
         *self.story_list_state.offset_mut() = 0;
+        self.recompute_visible_stories();
     }
 
     fn save_story_list_state_background(&self) {
@@ -269,8 +302,9 @@ impl App {
 
         let story_ids = self.story_ids.clone();
         let stories = self.stories.clone();
+        let feed = self.current_feed.as_str().to_string();
         tokio::spawn(async move {
-            if let Err(err) = store.save_story_list_state(story_ids, stories).await {
+            if let Err(err) = store.save_story_list_state(story_ids, stories, feed).await {
                 logging::log_error(format!("failed to save story list state: {err:#}"));
             }
         });
@@ -310,8 +344,9 @@ impl App {
         let client = self.client.clone();
         let tx = self.tx.clone();
         let count = self.cli.count;
+        let feed = self.current_feed;
         tokio::spawn(async move {
-            match client.fetch_initial_stories(count).await {
+            match client.fetch_initial_stories(feed, count).await {
                 Ok((story_ids, stories)) => {
                     let _ = tx.send(AppEvent::StoriesLoaded {
                         generation,
@@ -364,9 +399,10 @@ impl App {
         let tx = self.tx.clone();
         let story_ids = self.story_ids.clone();
         let page_size = self.cli.page_size;
+        let feed = self.current_feed;
         tokio::spawn(async move {
             match client
-                .fetch_more_stories(&story_ids, loaded, page_size)
+                .fetch_more_stories(feed, &story_ids, loaded, page_size)
                 .await
             {
                 Ok(stories) => {
@@ -612,6 +648,18 @@ impl App {
                 self.view = View::Stories;
                 self.maybe_prefetch_comments();
             }
+            (View::Stories, Action::OpenFeedFilter) => {
+                let cursor = FeedKind::ALL
+                    .iter()
+                    .position(|&f| f == self.current_feed)
+                    .unwrap_or(0);
+                self.feed_filter_popup = Some(FeedFilterPopup {
+                    focus: PopupFocus::FeedList,
+                    feed_cursor: cursor,
+                    filter_input: self.keyword_filter.clone(),
+                    prev_filter: self.keyword_filter.clone(),
+                });
+            }
             (View::Stories, Action::StartSearch) => {
                 self.search_input_active = true;
                 self.search_query.clear();
@@ -647,10 +695,11 @@ impl App {
             }
 
             (View::Stories, Action::MoveDown) => {
-                move_selection_down(&mut self.story_list_state, self.stories.len());
+                let count = self.visible_story_count();
+                move_selection_down(&mut self.story_list_state, count);
                 ensure_visible(
                     &mut self.story_list_state,
-                    self.stories.len(),
+                    count,
                     self.story_page_size,
                 );
                 self.maybe_prefetch_stories();
@@ -658,17 +707,19 @@ impl App {
             }
             (View::Stories, Action::MoveUp) => {
                 move_selection_up(&mut self.story_list_state);
+                let count = self.visible_story_count();
                 ensure_visible(
                     &mut self.story_list_state,
-                    self.stories.len(),
+                    count,
                     self.story_page_size,
                 );
                 self.maybe_prefetch_comments();
             }
             (View::Stories, Action::PageDown) => {
+                let count = self.visible_story_count();
                 page_down(
                     &mut self.story_list_state,
-                    self.stories.len(),
+                    count,
                     self.story_page_size,
                 );
                 self.maybe_prefetch_stories();
@@ -684,11 +735,12 @@ impl App {
                 self.maybe_prefetch_comments();
             }
             (View::Stories, Action::GoBottom) => {
-                if !self.stories.is_empty() {
-                    self.story_list_state.select(Some(self.stories.len() - 1));
+                let count = self.visible_story_count();
+                if count > 0 {
+                    self.story_list_state.select(Some(count - 1));
                     ensure_visible(
                         &mut self.story_list_state,
-                        self.stories.len(),
+                        count,
                         self.story_page_size,
                     );
                     self.maybe_prefetch_stories();
@@ -786,6 +838,11 @@ impl App {
         }
         self.last_user_activity = Instant::now();
 
+        if self.feed_filter_popup.is_some() {
+            self.handle_feed_filter_key(key);
+            return;
+        }
+
         if self.search_input_active {
             match key.code {
                 KeyCode::Enter => self.submit_search(),
@@ -862,9 +919,11 @@ impl App {
                     }
                 }
 
+                self.recompute_visible_stories();
+                let count = self.visible_story_count();
                 ensure_visible(
                     &mut self.story_list_state,
-                    self.stories.len(),
+                    count,
                     self.story_page_size,
                 );
                 self.save_story_list_state_background();
@@ -991,6 +1050,7 @@ impl App {
                 self.has_more_stories = false;
                 self.story_list_state.select(Some(0));
                 *self.story_list_state.offset_mut() = 0;
+                self.recompute_visible_stories();
             }
             AppEvent::PluginEvent(event) => {
                 self.summarize_plugin.handle_event(event);
@@ -1033,8 +1093,47 @@ impl App {
     }
 
     pub fn selected_story(&self) -> Option<&Story> {
-        let idx = self.story_list_state.selected().unwrap_or(0);
-        self.stories.get(idx)
+        let sel = self.story_list_state.selected().unwrap_or(0);
+        if self.keyword_filter.is_empty() {
+            self.stories.get(sel)
+        } else {
+            self.visible_story_indices
+                .get(sel)
+                .and_then(|&i| self.stories.get(i))
+        }
+    }
+
+    pub fn visible_story_count(&self) -> usize {
+        if self.keyword_filter.is_empty() {
+            self.stories.len()
+        } else {
+            self.visible_story_indices.len()
+        }
+    }
+
+    pub fn recompute_visible_stories(&mut self) {
+        if self.keyword_filter.is_empty() {
+            self.visible_story_indices.clear();
+        } else {
+            let filter = self.keyword_filter.to_lowercase();
+            self.visible_story_indices = self
+                .stories
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.title.to_lowercase().contains(&filter))
+                .map(|(i, _)| i)
+                .collect();
+        }
+        // Clamp selection
+        let count = self.visible_story_count();
+        if count == 0 {
+            self.story_list_state.select(Some(0));
+        } else {
+            let sel = self.story_list_state.selected().unwrap_or(0);
+            if sel >= count {
+                self.story_list_state.select(Some(count - 1));
+            }
+        }
     }
 
     pub fn is_comment_prefetching_for_story(&self, story_id: u64) -> bool {
@@ -1408,6 +1507,71 @@ impl App {
     fn cancel_search(&mut self) {
         self.search_input_active = false;
         self.search_query.clear();
+    }
+
+    fn handle_feed_filter_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let Some(popup) = self.feed_filter_popup.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                // Revert filter
+                self.keyword_filter = popup.prev_filter.clone();
+                self.feed_filter_popup = None;
+                self.recompute_visible_stories();
+            }
+            KeyCode::Tab => {
+                popup.focus = match popup.focus {
+                    PopupFocus::FeedList => PopupFocus::FilterInput,
+                    PopupFocus::FilterInput => PopupFocus::FeedList,
+                };
+            }
+            KeyCode::Enter => {
+                let selected_feed = FeedKind::ALL[popup.feed_cursor];
+                let feed_changed = selected_feed != self.current_feed;
+                self.keyword_filter = popup.filter_input.clone();
+                self.feed_filter_popup = None;
+
+                if feed_changed {
+                    if self.search_active {
+                        self.exit_search_mode();
+                    }
+                    self.current_feed = selected_feed;
+                    self.refresh_stories();
+                }
+                self.recompute_visible_stories();
+            }
+            KeyCode::Char('j') | KeyCode::Down
+                if popup.focus == PopupFocus::FeedList =>
+            {
+                if popup.feed_cursor + 1 < FeedKind::ALL.len() {
+                    popup.feed_cursor += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up
+                if popup.focus == PopupFocus::FeedList =>
+            {
+                popup.feed_cursor = popup.feed_cursor.saturating_sub(1);
+            }
+            KeyCode::Backspace if popup.focus == PopupFocus::FilterInput => {
+                popup.filter_input.pop();
+                self.keyword_filter = popup.filter_input.clone();
+                self.recompute_visible_stories();
+            }
+            KeyCode::Char(c)
+                if popup.focus == PopupFocus::FilterInput
+                    && (key.modifiers == KeyModifiers::NONE
+                        || key.modifiers == KeyModifiers::SHIFT) =>
+            {
+                popup.filter_input.push(c);
+                self.keyword_filter = popup.filter_input.clone();
+                self.recompute_visible_stories();
+            }
+            _ => {}
+        }
     }
 
     fn exit_search_mode(&mut self) {
@@ -1824,7 +1988,8 @@ pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
 
     if let Some(store) = &state_store {
         if let Some(state) = store.load_story_list_state().await? {
-            app.restore_story_list_state(state.story_ids, state.stories);
+            let feed = state.feed.as_deref().and_then(FeedKind::from_str_opt);
+            app.restore_story_list_state(state.story_ids, state.stories, feed);
         }
     }
     app.maybe_prefetch_comments();
@@ -1875,7 +2040,7 @@ pub async fn run(cli: Cli, plugin_config: Option<PluginConfig>) -> Result<()> {
     if let Some(store) = &state_store {
         if !app.story_ids.is_empty() && !app.stories.is_empty() {
             store
-                .save_story_list_state(app.story_ids.clone(), app.stories.clone())
+                .save_story_list_state(app.story_ids.clone(), app.stories.clone(), app.current_feed.as_str().to_string())
                 .await?;
         }
     }

@@ -12,26 +12,33 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     let spinner = app.spinner_frame();
+    let feed_label = app.current_feed.label();
+    let filter_suffix = if !app.keyword_filter.is_empty() {
+        let visible = app.visible_story_count();
+        format!(" (filtered: {visible})")
+    } else {
+        String::new()
+    };
     let title = if app.search_active {
         let n = app.stories.len();
         let q = &app.search_query;
         if app.story_loading {
             format!("Search: {q} (loading {spinner})")
         } else {
-            format!("Search: {q} ({n} results)")
+            format!("Search: {q} ({n} results){filter_suffix}")
         }
     } else if app.story_loading && app.stories.is_empty() {
-        format!("Hacker News (loading {spinner})")
+        format!("{feed_label} (loading {spinner})")
     } else if app.story_loading {
-        format!("Hacker News (refreshing {spinner})")
+        format!("{feed_label} (refreshing {spinner})")
     } else if app.prefetch_in_flight && app.has_comment_prefetch_in_flight() {
-        format!("Hacker News (prefetching + comments {spinner})")
+        format!("{feed_label} (prefetching + comments {spinner}){filter_suffix}")
     } else if app.prefetch_in_flight {
-        format!("Hacker News (prefetching {spinner})")
+        format!("{feed_label} (prefetching {spinner}){filter_suffix}")
     } else if app.has_comment_prefetch_in_flight() {
-        format!("Hacker News (preloading comments {spinner})")
+        format!("{feed_label} (preloading comments {spinner}){filter_suffix}")
     } else {
-        "Hacker News".to_string()
+        format!("{feed_label}{filter_suffix}")
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
@@ -62,45 +69,64 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let selected = app.story_list_state.selected().unwrap_or(0);
     let half_viewport = (app.story_page_size / 2).max(1);
 
+    let use_filter = !app.keyword_filter.is_empty();
+    let visible_count = app.visible_story_count();
+
     let items = if app.story_loading && app.stories.is_empty() {
         vec![ListItem::new(Line::from(format!("Loading {spinner}")))]
+    } else if visible_count == 0 && use_filter {
+        vec![ListItem::new(Line::from(
+            "No stories match filter. Press f to change.",
+        ))]
     } else if app.stories.is_empty() {
         vec![ListItem::new(Line::from(
             "No stories loaded. Press r to refresh.",
         ))]
     } else {
-        app.stories
-            .iter()
-            .enumerate()
-            .map(|(idx, story)| {
-                let domain = story
-                    .url
+        // Pre-collect data to avoid borrow conflicts with story_list_state
+        let story_data: Vec<_> = (0..visible_count)
+            .map(|idx| {
+                let story_idx = if use_filter {
+                    app.visible_story_indices[idx]
+                } else {
+                    idx
+                };
+                let story = &app.stories[story_idx];
+                (
+                    idx,
+                    story.id,
+                    story.title.clone(),
+                    story.url.clone(),
+                    story.score,
+                    story.comment_count,
+                    app.is_comment_prefetching_for_story(story.id),
+                )
+            })
+            .collect();
+
+        story_data
+            .into_iter()
+            .map(|(idx, _id, title, url, score, comment_count, prefetching)| {
+                let domain = url
                     .as_deref()
                     .and_then(domain_from_url)
                     .unwrap_or_else(|| "self".to_string());
-                let title = decode_html_entities(&story.title);
+                let title = decode_html_entities(&title).into_owned();
 
-                // Calculate importance from score + comments
-                let score_level = theme::score_level(story.score);
-                let comment_level = theme::comment_level(story.comment_count);
+                let score_level = theme::score_level(score);
+                let comment_level = theme::comment_level(comment_count);
                 let weighted = ((score_level * 0.7) + (comment_level * 0.3)).clamp(0.0, 1.0);
                 let importance = bucket_importance(weighted);
 
-                // Calculate distance from selected row
                 let distance = idx.abs_diff(selected);
-
-                // Get gradient color based on position, importance, and focus distance
                 let fg = theme::story_gradient_fg(idx, importance, distance, half_viewport);
 
-                // Style modifiers based on importance
                 let mut base_style = Style::default().fg(fg);
                 if importance >= 0.9 {
                     base_style = base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                 } else if importance >= 0.75 {
                     base_style = base_style.add_modifier(Modifier::BOLD);
                 }
-
-                let prefetching = app.is_comment_prefetching_for_story(story.id);
 
                 let mut spans = vec![
                     Span::styled(format!("{:>2}. ", idx + 1), base_style),
@@ -110,9 +136,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         base_style.add_modifier(Modifier::ITALIC),
                     ),
                     Span::raw("  "),
-                    Span::styled(format!("{}", story.score), base_style),
+                    Span::styled(format!("{}", score), base_style),
                     Span::styled("·", base_style),
-                    Span::styled(format!("{}", story.comment_count), base_style),
+                    Span::styled(format!("{}", comment_count), base_style),
                 ];
 
                 if prefetching {
@@ -196,14 +222,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = if app.search_input_active || app.search_active {
-        Line::from(format!(
-            "j/k:nav  Enter/Space/l/→:comments  o:source  /:search  Esc:back to feed  ?:help"
-        ))
+        Line::from(
+            "j/k:nav  Enter/Space/l/→:comments  o:source  /:search  f:feeds  Esc:back to feed  ?:help"
+                .to_string(),
+        )
     } else {
+        let count_info = if use_filter {
+            format!("{}/{} visible  {}/{} loaded", visible_count, app.stories.len(), app.stories.len(), app.story_ids.len())
+        } else {
+            format!("{}/{} loaded", app.stories.len(), app.story_ids.len())
+        };
         Line::from(format!(
-            "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  /:search  r:refresh  ?:help  q:quit    {}/{} loaded",
-            app.stories.len(),
-            app.story_ids.len()
+            "j/k:nav  Enter/Space/l/→:comments  o:source  O:comments  /:search  f:feeds  r:refresh  ?:help  q:quit    {count_info}"
         ))
     };
     let paragraph = Paragraph::new(vec![meta, help]);

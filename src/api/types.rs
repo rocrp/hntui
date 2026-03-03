@@ -36,6 +36,85 @@ impl FromStr for ApiBackend {
     }
 }
 
+/// Which feed to display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FeedKind {
+    #[default]
+    Top,
+    New,
+    Best,
+    Ask,
+    Show,
+    Jobs,
+}
+
+impl FeedKind {
+    pub const ALL: [FeedKind; 6] = [
+        FeedKind::Top,
+        FeedKind::New,
+        FeedKind::Best,
+        FeedKind::Ask,
+        FeedKind::Show,
+        FeedKind::Jobs,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Top => "Top Stories",
+            Self::New => "New Stories",
+            Self::Best => "Best Stories",
+            Self::Ask => "Ask HN",
+            Self::Show => "Show HN",
+            Self::Jobs => "Jobs",
+        }
+    }
+
+    pub fn hackerweb_path(self) -> &'static str {
+        match self {
+            Self::Top => "/news",
+            Self::New => "/newest",
+            Self::Best => "/best",
+            Self::Ask => "/ask",
+            Self::Show => "/show",
+            Self::Jobs => "/jobs",
+        }
+    }
+
+    pub fn firebase_path(self) -> &'static str {
+        match self {
+            Self::Top => "/topstories.json",
+            Self::New => "/newstories.json",
+            Self::Best => "/beststories.json",
+            Self::Ask => "/askstories.json",
+            Self::Show => "/showstories.json",
+            Self::Jobs => "/jobstories.json",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::New => "new",
+            Self::Best => "best",
+            Self::Ask => "ask",
+            Self::Show => "show",
+            Self::Jobs => "jobs",
+        }
+    }
+
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        match s {
+            "top" => Some(Self::Top),
+            "new" => Some(Self::New),
+            "best" => Some(Self::Best),
+            "ask" => Some(Self::Ask),
+            "show" => Some(Self::Show),
+            "jobs" => Some(Self::Jobs),
+            _ => None,
+        }
+    }
+}
+
 // ── node-hnapi (HackerWeb) response types ──
 
 /// A story from `/news?page=N`.

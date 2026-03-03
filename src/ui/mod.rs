@@ -1,4 +1,5 @@
 pub mod comment_view;
+pub mod feed_filter;
 pub mod help;
 pub mod markdown;
 pub mod plugin_overlay;
@@ -36,13 +37,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         View::Comments => comment_view::render(frame, app),
     }
 
-    let has_overlay = app.summarize_plugin.is_overlay_visible() || app.help_visible;
+    let has_overlay = app.summarize_plugin.is_overlay_visible()
+        || app.help_visible
+        || app.feed_filter_popup.is_some();
     if has_overlay {
         frame.render_widget(Dim, frame.area());
     }
 
     let spinner = app.spinner_frame();
     plugin_overlay::render(frame, &mut app.summarize_plugin, spinner);
+    if app.feed_filter_popup.is_some() {
+        feed_filter::render(frame, app);
+    }
     if app.help_visible {
         help::render(frame, app);
     }

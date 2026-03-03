@@ -1,5 +1,5 @@
 use crate::api::file_cache::{CacheHit, FileCache};
-use crate::api::types::{ApiBackend, Comment, CommentNode, HnItem, Story, WebItem, WebStory};
+use crate::api::types::{ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, WebItem, WebStory};
 use crate::logging;
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -28,12 +28,13 @@ pub struct HnClient {
     concurrency: usize,
     revalidate_semaphore: Arc<Semaphore>,
     in_flight: Arc<Mutex<HashMap<u64, broadcast::Sender<Result<HnItem, String>>>>>,
-    story_ids_cache: Arc<Mutex<Option<(Vec<u64>, Instant)>>>,
+    story_ids_cache: Arc<Mutex<HashMap<FeedKind, (Vec<u64>, Instant)>>>,
 }
 
 const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 2;
 const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 8;
 const REVALIDATE_CONCURRENCY: usize = 4;
+#[allow(dead_code)]
 const STORY_IDS_CACHE_TTL: Duration = Duration::from_secs(60);
 const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -67,52 +68,47 @@ impl HnClient {
             concurrency,
             revalidate_semaphore: Arc::new(Semaphore::new(REVALIDATE_CONCURRENCY)),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
-            story_ids_cache: Arc::new(Mutex::new(None)),
+            story_ids_cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub async fn fetch_top_story_ids(&self) -> Result<Vec<u64>> {
+    #[allow(dead_code)]
+    pub async fn fetch_story_ids(&self, feed: FeedKind) -> Result<Vec<u64>> {
         {
             let cache = self.story_ids_cache.lock().await;
-            if let Some((ids, fetched_at)) = cache.as_ref() {
+            if let Some((ids, fetched_at)) = cache.get(&feed) {
                 if fetched_at.elapsed() < STORY_IDS_CACHE_TTL {
                     return Ok(ids.clone());
                 }
             }
         }
 
-        let ids = self.fetch_top_story_ids_network().await?;
+        let ids = self.fetch_story_ids_network(feed).await?;
         let mut cache = self.story_ids_cache.lock().await;
-        *cache = Some((ids.clone(), Instant::now()));
+        cache.insert(feed, (ids.clone(), Instant::now()));
         Ok(ids)
     }
 
-    pub async fn fetch_top_story_ids_force(&self) -> Result<Vec<u64>> {
-        let ids = self.fetch_top_story_ids_network().await?;
+    pub async fn fetch_story_ids_force(&self, feed: FeedKind) -> Result<Vec<u64>> {
+        let ids = self.fetch_story_ids_network(feed).await?;
         let mut cache = self.story_ids_cache.lock().await;
-        *cache = Some((ids.clone(), Instant::now()));
+        cache.insert(feed, (ids.clone(), Instant::now()));
         Ok(ids)
     }
 
-    async fn fetch_top_story_ids_network(&self) -> Result<Vec<u64>> {
-        let url = format!("{}/topstories.json", self.base_url);
+    async fn fetch_story_ids_network(&self, feed: FeedKind) -> Result<Vec<u64>> {
+        let url = format!("{}{}", self.base_url, feed.firebase_path());
+        let label = feed.as_str();
         self.http
             .get(url)
             .send()
             .await
-            .context("fetch topstories")?
+            .with_context(|| format!("fetch {label} stories"))?
             .error_for_status()
-            .context("topstories status")?
+            .with_context(|| format!("{label} stories status"))?
             .json::<Vec<u64>>()
             .await
-            .context("decode topstories")
-    }
-
-    #[allow(dead_code)]
-    pub async fn fetch_top_stories(&self, count: usize) -> Result<Vec<Story>> {
-        let ids = self.fetch_top_story_ids().await?;
-        let ids = ids.into_iter().take(count).collect::<Vec<_>>();
-        self.fetch_stories_batch(&ids).await
+            .with_context(|| format!("decode {label} stories"))
     }
 
     pub fn cleanup_disk_cache_background(&self, max_age: Duration) {
@@ -139,12 +135,12 @@ impl HnClient {
     ///
     /// - **HackerWeb**: fetches pre-assembled pages (page 1 + page 2 if count > 30).
     /// - **Firebase**: fetches story IDs then batch-fetches items.
-    pub async fn fetch_initial_stories(&self, count: usize) -> Result<(Vec<u64>, Vec<Story>)> {
+    pub async fn fetch_initial_stories(&self, feed: FeedKind, count: usize) -> Result<(Vec<u64>, Vec<Story>)> {
         match self.backend {
             ApiBackend::HackerWeb => {
-                let mut stories = self.fetch_hackerweb_news(1).await?;
+                let mut stories = self.fetch_hackerweb_feed(feed, 1).await?;
                 if count > 30 && stories.len() == 30 {
-                    let page2 = self.fetch_hackerweb_news(2).await?;
+                    let page2 = self.fetch_hackerweb_feed(feed, 2).await?;
                     stories.extend(page2);
                 }
                 stories.truncate(count);
@@ -152,7 +148,7 @@ impl HnClient {
                 Ok((ids, stories))
             }
             ApiBackend::Firebase => {
-                let story_ids = self.fetch_top_story_ids_force().await?;
+                let story_ids = self.fetch_story_ids_force(feed).await?;
                 let ids: Vec<u64> = story_ids.iter().copied().take(count).collect();
                 let stories = self.fetch_stories_batch(&ids).await?;
                 Ok((story_ids, stories))
@@ -166,6 +162,7 @@ impl HnClient {
     /// - **Firebase**: uses stored story_ids to batch-fetch the next slice.
     pub async fn fetch_more_stories(
         &self,
+        feed: FeedKind,
         story_ids: &[u64],
         loaded_count: usize,
         page_size: usize,
@@ -173,7 +170,7 @@ impl HnClient {
         match self.backend {
             ApiBackend::HackerWeb => {
                 let page = (loaded_count / 30) + 2; // page 1 already loaded, so next is 2, etc.
-                self.fetch_hackerweb_news(page).await
+                self.fetch_hackerweb_feed(feed, page).await
             }
             ApiBackend::Firebase => {
                 if loaded_count >= story_ids.len() {
@@ -233,20 +230,22 @@ impl HnClient {
 
     // ── HackerWeb private methods ──
 
-    async fn fetch_hackerweb_news(&self, page: usize) -> Result<Vec<Story>> {
-        let url = format!("{}/news?page={page}", self.base_url);
+    async fn fetch_hackerweb_feed(&self, feed: FeedKind, page: usize) -> Result<Vec<Story>> {
+        let path = feed.hackerweb_path();
+        let url = format!("{}{}?page={page}", self.base_url, path);
+        let label = feed.as_str();
         logging::log_info(format!("hackerweb: fetching {url}"));
         let web_stories: Vec<WebStory> = self
             .http
             .get(&url)
             .send()
             .await
-            .with_context(|| format!("fetch hackerweb news page={page}"))?
+            .with_context(|| format!("fetch hackerweb {label} page={page}"))?
             .error_for_status()
-            .with_context(|| format!("hackerweb news status page={page}"))?
+            .with_context(|| format!("hackerweb {label} status page={page}"))?
             .json()
             .await
-            .with_context(|| format!("decode hackerweb news page={page}"))?;
+            .with_context(|| format!("decode hackerweb {label} page={page}"))?;
         Ok(web_stories.into_iter().map(Story::from).collect())
     }
 

@@ -20,6 +20,7 @@ pub enum Action {
     Refresh,
     Summarize,
     StartSearch,
+    OpenFeedFilter,
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +73,7 @@ impl KeyState {
                     (KeyCode::Char('r'), KeyModifiers::NONE) => Some(Action::Refresh),
                     (KeyCode::Char('s'), KeyModifiers::NONE) => Some(Action::Summarize),
                     (KeyCode::Char('/'), _) => Some(Action::StartSearch),
+                    (KeyCode::Char('f'), KeyModifiers::NONE) => Some(Action::OpenFeedFilter),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::BackOrQuit),
                     _ => None,
                 }

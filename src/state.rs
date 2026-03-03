@@ -15,6 +15,8 @@ pub(crate) struct StoryListState {
     pub saved_at: i64,
     pub story_ids: Vec<u64>,
     pub stories: Vec<Story>,
+    #[serde(default)]
+    pub feed: Option<String>,
 }
 
 impl StateStore {
@@ -40,6 +42,7 @@ impl StateStore {
         &self,
         story_ids: Vec<u64>,
         stories: Vec<Story>,
+        feed: String,
     ) -> Result<()> {
         anyhow::ensure!(
             !story_ids.is_empty(),
@@ -51,6 +54,7 @@ impl StateStore {
             saved_at: now_unix()?,
             story_ids,
             stories,
+            feed: Some(feed),
         };
         let bytes = serde_json::to_vec(&state).context("encode story list state")?;
         atomic_write(&self.path, &bytes).await?;

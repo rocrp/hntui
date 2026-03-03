@@ -5,4 +5,4 @@ pub mod types;
 
 pub use client::{DiskCacheConfig, HnClient};
 pub use search::SearchClient;
-pub use types::{ApiBackend, CommentNode, Story};
+pub use types::{ApiBackend, CommentNode, FeedKind, Story};
