@@ -49,7 +49,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
-    app.layout_areas = LayoutAreas { list_area, frame_area: area };
+    app.layout_areas = LayoutAreas {
+        list_area,
+        frame_area: area,
+    };
     app.story_page_size = (list_area.height as usize).max(1);
     app.maybe_prefetch_stories();
 
@@ -70,6 +73,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let selected = app.story_list_state.selected().unwrap_or(0);
     let half_viewport = (app.story_page_size / 2).max(1);
 
+    let now = now_unix();
     let use_filter = !app.keyword_filter.is_empty();
     let visible_count = app.visible_story_count();
 
@@ -101,6 +105,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     story.url.clone(),
                     story.score,
                     story.comment_count,
+                    story.time,
                     app.is_comment_prefetching_for_story(story.id),
                 )
             })
@@ -109,7 +114,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         story_data
             .into_iter()
             .map(
-                |(idx, story_idx, _id, title, url, score, comment_count, prefetching)| {
+                |(idx, story_idx, _id, title, url, score, comment_count, time, prefetching)| {
                     let domain = url
                         .as_deref()
                         .and_then(domain_from_url)
@@ -145,6 +150,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         Span::styled(format!("{}", comment_count), base_style),
                     ];
 
+                    if app.search_active {
+                        spans.push(Span::styled(
+                            format!(" {}", format_age(time, now)),
+                            Style::default().fg(theme::palette().subtext0),
+                        ));
+                    }
+
                     if prefetching {
                         spans.push(Span::raw("  "));
                         spans.push(Span::styled(
@@ -170,7 +182,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let footer_inner = footer_block.inner(footer_area);
     frame.render_widget(footer_block, footer_area);
 
-    let now = now_unix();
     let meta = if app.filter_input_active {
         let cursor = format!("Filter: {}│", app.keyword_filter);
         Line::from(vec![
