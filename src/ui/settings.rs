@@ -2,7 +2,7 @@ use crate::app::{App, SettingsPopup};
 use crate::ui::theme;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use std::time::Duration;
 
@@ -88,12 +88,16 @@ pub fn render(frame: &mut Frame, app: &App) {
         .is_some_and(|t| t.elapsed() < Duration::from_secs(2));
 
     if show_saved {
-        lines.push(Line::from(Span::styled(
-            "Saved!",
-            Style::default()
-                .fg(theme::palette().green)
-                .add_modifier(Modifier::BOLD),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Saved! ",
+                Style::default()
+                    .fg(theme::palette().green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Esc/q", key_style),
+            Span::styled(":close", hint_style),
+        ]));
     } else {
         lines.push(Line::from(vec![
             Span::styled("j/k", key_style),
@@ -101,7 +105,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Span::styled("Enter", key_style),
             Span::styled(":edit  ", hint_style),
             Span::styled("Esc/q", key_style),
-            Span::styled(":save & close", hint_style),
+            Span::styled(":close", hint_style),
         ]));
     }
 
@@ -114,7 +118,6 @@ pub fn render(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .title(Span::styled(",", header_style));
     let paragraph = Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: true })
         .block(block)
         .style(Style::default().bg(theme::palette().surface2));
     frame.render_widget(paragraph, popup_rect);

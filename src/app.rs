@@ -1045,6 +1045,7 @@ impl App {
                 let popup_rect =
                     crate::ui::centered(frame_area, desired_width, desired_height);
                 if !rect_contains(popup_rect, col, row) {
+                    self.save_settings();
                     self.settings_popup = None;
                 }
             }
@@ -1883,7 +1884,11 @@ impl App {
 
         if popup.editing {
             match key.code {
-                KeyCode::Enter => popup.confirm_edit(),
+                KeyCode::Enter => {
+                    popup.confirm_edit();
+                    // Save immediately so in-popup "Saved!" flash shows
+                    self.save_settings();
+                }
                 KeyCode::Esc => popup.cancel_edit(),
                 KeyCode::Backspace => {
                     popup.edit_buffer.pop();
@@ -1910,7 +1915,6 @@ impl App {
                 popup.cursor = popup.cursor.saturating_sub(1);
             }
             (KeyCode::Enter, _) => popup.start_editing(),
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => self.save_settings(),
             (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
                 self.save_settings();
                 self.settings_popup = None;
