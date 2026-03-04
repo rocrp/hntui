@@ -46,7 +46,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         let padded_label = format!("{:width$}", labels[i], width = max_label_len);
 
         let display_value = if is_editing {
-            format!("{}_", popup.edit_buffer)
+            // Handled below with cursor spans
+            String::new()
         } else if i == 2 && !values[i].is_empty() {
             // Mask API key
             let v = values[i];
@@ -67,17 +68,38 @@ pub fn render(frame: &mut Frame, app: &App) {
             label_style
         };
 
-        lines.push(Line::from(vec![
-            Span::styled(format!("{marker}{padded_label}: "), style),
-            Span::styled(
-                display_value,
-                if is_editing {
-                    editing_style
-                } else {
-                    value_style
-                },
-            ),
-        ]));
+        if is_editing {
+            let buf = &popup.edit_buffer;
+            let pos = popup.edit_cursor;
+            let chars: Vec<char> = buf.chars().collect();
+            let before: String = chars[..pos].iter().collect();
+            let cursor_char: String;
+            let after: String;
+
+            let block_cursor_style = Style::default()
+                .fg(theme::palette().surface2)
+                .bg(theme::palette().green);
+
+            if pos < chars.len() {
+                cursor_char = chars[pos].to_string();
+                after = chars[pos + 1..].iter().collect();
+            } else {
+                cursor_char = " ".to_string();
+                after = String::new();
+            }
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("{marker}{padded_label}: "), style),
+                Span::styled(before, editing_style),
+                Span::styled(cursor_char, block_cursor_style),
+                Span::styled(after, editing_style),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{marker}{padded_label}: "), style),
+                Span::styled(display_value, value_style),
+            ]));
+        }
     }
 
     lines.push(Line::raw(""));

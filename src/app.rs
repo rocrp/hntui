@@ -86,6 +86,7 @@ pub struct SettingsPopup {
     pub cursor: usize,
     pub editing: bool,
     pub edit_buffer: String,
+    pub edit_cursor: usize,
     pub api_url: String,
     pub model: String,
     pub api_key: String,
@@ -103,6 +104,7 @@ impl SettingsPopup {
                 cursor: 0,
                 editing: false,
                 edit_buffer: String::new(),
+                edit_cursor: 0,
                 api_url: c.api_url.clone(),
                 model: c.model.clone(),
                 api_key: c.api_key.clone(),
@@ -114,6 +116,7 @@ impl SettingsPopup {
                 cursor: 0,
                 editing: false,
                 edit_buffer: String::new(),
+                edit_cursor: 0,
                 api_url: String::new(),
                 model: String::new(),
                 api_key: String::new(),
@@ -152,6 +155,7 @@ impl SettingsPopup {
     pub fn start_editing(&mut self) {
         self.editing = true;
         self.edit_buffer = self.field_values()[self.cursor].to_string();
+        self.edit_cursor = self.edit_buffer.chars().count();
     }
 
     pub fn confirm_edit(&mut self) {
@@ -159,11 +163,75 @@ impl SettingsPopup {
         *self.field_mut(self.cursor) = val;
         self.editing = false;
         self.edit_buffer.clear();
+        self.edit_cursor = 0;
     }
 
     pub fn cancel_edit(&mut self) {
         self.editing = false;
         self.edit_buffer.clear();
+        self.edit_cursor = 0;
+    }
+
+    /// Byte offset for the current char-index cursor position.
+    fn cursor_byte_offset(&self) -> usize {
+        self.edit_buffer
+            .char_indices()
+            .nth(self.edit_cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.edit_buffer.len())
+    }
+
+    /// Char-index of the previous word boundary (for word-backward navigation).
+    fn prev_word_boundary(&self) -> usize {
+        if self.edit_cursor == 0 {
+            return 0;
+        }
+        let chars: Vec<char> = self.edit_buffer.chars().collect();
+        let mut i = self.edit_cursor;
+        // Skip whitespace before cursor
+        while i > 0 && chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        // Skip word chars
+        while i > 0 && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Char-index of the next word boundary (for word-forward navigation).
+    fn next_word_boundary(&self) -> usize {
+        let len = self.edit_buffer.chars().count();
+        if self.edit_cursor >= len {
+            return len;
+        }
+        let chars: Vec<char> = self.edit_buffer.chars().collect();
+        let mut i = self.edit_cursor;
+        // Skip current word chars
+        while i < len && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        // Skip whitespace
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
+
+    /// Delete from previous word boundary to cursor.
+    fn delete_word_backward(&mut self) {
+        let target = self.prev_word_boundary();
+        if target == self.edit_cursor {
+            return;
+        }
+        let byte_start = self.edit_buffer
+            .char_indices()
+            .nth(target)
+            .map(|(i, _)| i)
+            .unwrap_or(self.edit_buffer.len());
+        let byte_end = self.cursor_byte_offset();
+        self.edit_buffer.replace_range(byte_start..byte_end, "");
+        self.edit_cursor = target;
     }
 }
 
@@ -1883,21 +1951,95 @@ impl App {
         };
 
         if popup.editing {
+            let mods = key.modifiers;
+            let ctrl = mods.contains(KeyModifiers::CONTROL);
+            let alt = mods.contains(KeyModifiers::ALT);
+
             match key.code {
                 KeyCode::Enter => {
                     popup.confirm_edit();
-                    // Save immediately so in-popup "Saved!" flash shows
                     self.save_settings();
                 }
                 KeyCode::Esc => popup.cancel_edit(),
-                KeyCode::Backspace => {
-                    popup.edit_buffer.pop();
+
+                // Cursor movement
+                KeyCode::Left if alt => {
+                    popup.edit_cursor = popup.prev_word_boundary();
                 }
+                KeyCode::Left => {
+                    popup.edit_cursor = popup.edit_cursor.saturating_sub(1);
+                }
+                KeyCode::Right if alt => {
+                    popup.edit_cursor = popup.next_word_boundary();
+                }
+                KeyCode::Right => {
+                    let len = popup.edit_buffer.chars().count();
+                    if popup.edit_cursor < len {
+                        popup.edit_cursor += 1;
+                    }
+                }
+                KeyCode::Home => popup.edit_cursor = 0,
+                KeyCode::End => popup.edit_cursor = popup.edit_buffer.chars().count(),
+
+                // Ctrl+A / Ctrl+E — beginning / end of line
+                KeyCode::Char('a') if ctrl => popup.edit_cursor = 0,
+                KeyCode::Char('e') if ctrl => {
+                    popup.edit_cursor = popup.edit_buffer.chars().count();
+                }
+
+                // Deletion
+                KeyCode::Backspace if ctrl || alt => {
+                    popup.delete_word_backward();
+                }
+                KeyCode::Backspace => {
+                    if popup.edit_cursor > 0 {
+                        let byte = popup.cursor_byte_offset();
+                        // Find start of previous char
+                        let prev_byte = popup
+                            .edit_buffer[..byte]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        popup.edit_buffer.replace_range(prev_byte..byte, "");
+                        popup.edit_cursor -= 1;
+                    }
+                }
+                KeyCode::Delete => {
+                    let len = popup.edit_buffer.chars().count();
+                    if popup.edit_cursor < len {
+                        let byte = popup.cursor_byte_offset();
+                        let next_byte = popup.edit_buffer[byte..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| byte + i)
+                            .unwrap_or(popup.edit_buffer.len());
+                        popup.edit_buffer.replace_range(byte..next_byte, "");
+                    }
+                }
+
+                // Ctrl+W — delete word backward
+                KeyCode::Char('w') if ctrl => {
+                    popup.delete_word_backward();
+                }
+                // Ctrl+U — delete to beginning of line
+                KeyCode::Char('u') if ctrl => {
+                    let byte = popup.cursor_byte_offset();
+                    popup.edit_buffer.replace_range(..byte, "");
+                    popup.edit_cursor = 0;
+                }
+                // Ctrl+K — delete to end of line
+                KeyCode::Char('k') if ctrl => {
+                    let byte = popup.cursor_byte_offset();
+                    popup.edit_buffer.truncate(byte);
+                }
+
+                // Regular character input
                 KeyCode::Char(c) => {
-                    if key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT
-                    {
-                        popup.edit_buffer.push(c);
+                    if !ctrl && !alt {
+                        let byte = popup.cursor_byte_offset();
+                        popup.edit_buffer.insert(byte, c);
+                        popup.edit_cursor += 1;
                     }
                 }
                 _ => {}
