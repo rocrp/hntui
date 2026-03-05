@@ -2,10 +2,14 @@
 
 Hacker News TUI — top stories + nested comments.
 
+## Demo
+
+![demo](screenshots/demo.gif)
+
 ## Screenshots
 
-![Stories view](screenshots/hntui1.png)
-![Comments view](screenshots/hntui2.png)
+![Stories view](screenshots/stories.png)
+![Comments view](screenshots/comments.png)
 
 ## Install
 
