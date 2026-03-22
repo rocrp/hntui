@@ -276,6 +276,7 @@ pub struct App {
     pub comment_line_offset: usize,
 
     pub last_error: Option<String>,
+    pub copied_flash: Option<Instant>,
     pub layout_areas: LayoutAreas,
 
     client: HnClient,
@@ -359,6 +360,7 @@ impl App {
             comment_line_offset: 0,
 
             last_error: None,
+            copied_flash: None,
             layout_areas: LayoutAreas::default(),
 
             client,
@@ -977,6 +979,10 @@ impl App {
             (View::Comments, Action::Collapse) => self.collapse_selected_comment(),
             (View::Comments, Action::Expand) => self.expand_selected_comment(),
             (View::Comments, Action::ToggleCollapse) => self.toggle_selected_comment_collapse(),
+
+            (View::Comments, Action::CopyComment) => {
+                self.copy_selected_comment();
+            }
 
             (View::Comments, Action::Summarize) => {
                 let ctx = PluginContext {
@@ -1781,6 +1787,26 @@ impl App {
                 }
             }
         });
+    }
+
+    fn copy_selected_comment(&mut self) {
+        let Some(selected) = self.comment_list_state.selected() else {
+            return;
+        };
+        let Some(comment) = self.comment_list.get(selected) else {
+            return;
+        };
+        let plain = crate::ui::comment_view::hn_html_to_plain(&comment.text);
+        let by = comment.by.as_deref().unwrap_or("[unknown]");
+        let text = format!("{by}: {plain}");
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+            Ok(()) => {
+                self.copied_flash = Some(Instant::now());
+            }
+            Err(e) => {
+                self.last_error = Some(format!("clipboard: {e}"));
+            }
+        }
     }
 
     fn collapse_selected_comment(&mut self) {

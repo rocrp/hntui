@@ -23,6 +23,7 @@ pub enum Action {
     OpenFeedFilter,
     OpenFilter,
     OpenSettings,
+    CopyComment,
 }
 
 #[derive(Debug, Default)]
@@ -78,6 +79,7 @@ impl KeyState {
                     (KeyCode::Char('f'), KeyModifiers::NONE) => Some(Action::OpenFeedFilter),
                     (KeyCode::Char('F'), KeyModifiers::SHIFT)
                     | (KeyCode::Char('F'), KeyModifiers::NONE) => Some(Action::OpenFilter),
+                    (KeyCode::Char('y'), KeyModifiers::NONE) => Some(Action::CopyComment),
                     (KeyCode::Char(','), KeyModifiers::NONE) => Some(Action::OpenSettings),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::BackOrQuit),
                     _ => None,

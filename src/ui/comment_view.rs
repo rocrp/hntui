@@ -125,18 +125,31 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             let body_indent = format!("{indent}  ");
             let body_width = content_width.saturating_sub(indent_width + 2).max(1);
             let plain = hn_html_to_plain(&comment.text);
+            let quote_style = Style::default()
+                .fg(theme::palette().subtext0)
+                .add_modifier(Modifier::ITALIC);
+            let quote_bar_style = Style::default().fg(theme::palette().overlay0);
 
             if !plain.is_empty() {
-                let wrapped = wrap_plain(&plain, body_width, comment_max_lines);
+                let wrapped = wrap_content(&plain, body_width, comment_max_lines);
                 for wline in wrapped {
-                    if wline.is_empty() {
-                        // Paragraph separator
-                        lines.push(Line::from(Span::styled(body_indent.clone(), indent_style)));
-                    } else {
-                        lines.push(Line::from(vec![
-                            Span::styled(body_indent.clone(), indent_style),
-                            Span::styled(wline, content_style),
-                        ]));
+                    match wline {
+                        ContentLine::Normal(text) => {
+                            lines.push(Line::from(vec![
+                                Span::styled(body_indent.clone(), indent_style),
+                                Span::styled(text, content_style),
+                            ]));
+                        }
+                        ContentLine::Quote(text) => {
+                            lines.push(Line::from(vec![
+                                Span::styled(body_indent.clone(), indent_style),
+                                Span::styled("▎ ", quote_bar_style),
+                                Span::styled(text, quote_style),
+                            ]));
+                        }
+                        ContentLine::Blank => {
+                            lines.push(Line::from(Span::styled(body_indent.clone(), indent_style)));
+                        }
                     }
                 }
             }
@@ -189,11 +202,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let mut visible_lines = Vec::with_capacity(end.saturating_sub(start));
         let mut line_idx = 0usize;
+        let dim_target = theme::palette().overlay0;
         'outer: for (idx, lines) in comment_lines.iter().enumerate() {
             for (line_in_comment, line) in lines.iter().enumerate() {
                 if line_idx >= start && line_idx < end {
                     let mut line = line.clone();
-                    // Rainbow gradient based on distance from selected comment.
+                    // Distance-based dimming: preserve each span's original color identity,
+                    // just fade toward overlay0 with distance from selected comment.
                     let dist = if line_idx < sel_start {
                         sel_start - line_idx
                     } else if line_idx >= sel_end {
@@ -201,17 +216,28 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     } else {
                         0
                     };
-                    if let Some(fg) = theme::focus_gradient_fg(line_idx, dist, half_viewport) {
-                        // Override each span's foreground color.
+                    if dist > 0 {
+                        let max_dist = half_viewport.max(1) as f64;
+                        let fade = (dist as f64 / max_dist).min(1.0);
+                        let dim_factor = fade * 0.7;
                         line = Line::from(
                             line.spans
                                 .into_iter()
-                                .map(|span| Span::styled(span.content, span.style.fg(fg)))
+                                .map(|span| {
+                                    if let Some(fg) = span.style.fg {
+                                        Span::styled(
+                                            span.content,
+                                            span.style.fg(theme::blend(fg, dim_target, dim_factor)),
+                                        )
+                                    } else {
+                                        span
+                                    }
+                                })
                                 .collect::<Vec<_>>(),
                         );
                     }
 
-                    // Story-list-like selection: only highlight the "cell" line (comment header).
+                    // Highlight the header line (first line) of the selected comment.
                     if idx == selected && line_in_comment == 0 {
                         line = line.patch_style(highlight_style);
                     }
@@ -236,7 +262,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(footer_block, footer_area);
 
     let now = now_unix();
-    let meta = if let Some(err) = app.last_error.as_deref() {
+    let show_copied = app.copied_flash.is_some_and(|t| t.elapsed().as_secs() < 2);
+    let meta = if show_copied {
+        Line::from(Span::styled(
+            "Copied!",
+            Style::default()
+                .fg(theme::palette().green)
+                .add_modifier(Modifier::BOLD),
+        ))
+    } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
             Style::default().fg(theme::palette().red),
@@ -254,7 +288,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let help = Line::from(format!(
-        "j/k:nav  h/←:collapse  l/→:expand  Enter/c:toggle  s:summarize  o:comments  O:source  r:refresh  ?:help  q:back    {} comments",
+        "j/k:nav  h/←:collapse  l/→:expand  Enter/c:toggle  y:copy  s:summarize  o:comments  O:source  r:refresh  ?:help  q:back    {} comments",
         app.comment_list.len()
     ));
     frame.render_widget(Paragraph::new(vec![meta, help]), footer_inner);
@@ -320,58 +354,106 @@ fn collapse_spaces(s: &str) -> String {
     out
 }
 
-fn wrap_plain(s: &str, width: usize, max_lines: usize) -> Vec<String> {
+enum ContentLine {
+    Normal(String),
+    Quote(String),
+    Blank,
+}
+
+/// Wraps plain text into structured lines, detecting `>` quoted paragraphs
+/// and preserving paragraph breaks as `Blank` separators.
+fn wrap_content(s: &str, width: usize, max_lines: usize) -> Vec<ContentLine> {
     if max_lines == 0 {
-        return vec![String::new()];
+        return vec![ContentLine::Normal(String::new())];
     }
     let width = width.max(1);
+    // Quote lines get a "▎ " prefix (2 chars) so they wrap narrower
+    let quote_width = width.saturating_sub(2).max(1);
 
-    let mut out = Vec::new();
-    let mut current = String::new();
+    // Split into paragraphs, classify each as quote or normal
+    let mut paragraphs: Vec<(String, bool)> = Vec::new();
+    let mut current_para = String::new();
+    let mut is_quote = false;
+    let mut first_line = true;
 
     for raw_line in s.split('\n') {
         let line = collapse_spaces(raw_line.trim());
         if line.is_empty() {
-            // Paragraph break: flush current buffer, then add empty line as separator
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                if out.len() >= max_lines {
-                    return out;
-                }
-            }
-            out.push(String::new());
-            if out.len() >= max_lines {
-                return out;
+            if !current_para.is_empty() {
+                paragraphs.push((std::mem::take(&mut current_para), is_quote));
+                first_line = true;
             }
             continue;
         }
 
-        for word in line.split_whitespace() {
+        if first_line {
+            is_quote = line.starts_with('>');
+            first_line = false;
+        }
+
+        let text = if is_quote {
+            line.trim_start_matches('>').trim_start().to_string()
+        } else {
+            line
+        };
+
+        if !current_para.is_empty() {
+            current_para.push(' ');
+        }
+        current_para.push_str(&text);
+    }
+    if !current_para.is_empty() {
+        paragraphs.push((current_para, is_quote));
+    }
+
+    // Wrap each paragraph, inserting Blank separators between them
+    let mut out = Vec::new();
+    for (pi, (para, quoted)) in paragraphs.iter().enumerate() {
+        if pi > 0 {
+            out.push(ContentLine::Blank);
+            if out.len() >= max_lines {
+                return out;
+            }
+        }
+
+        let w = if *quoted { quote_width } else { width };
+        let mut current = String::new();
+        for word in para.split_whitespace() {
             if current.is_empty() {
                 current.push_str(word);
                 continue;
             }
-
             let next_len = current.chars().count() + 1 + word.chars().count();
-            if next_len <= width {
+            if next_len <= w {
                 current.push(' ');
                 current.push_str(word);
                 continue;
             }
-
-            out.push(std::mem::take(&mut current));
+            let line = std::mem::take(&mut current);
+            out.push(if *quoted {
+                ContentLine::Quote(line)
+            } else {
+                ContentLine::Normal(line)
+            });
             if out.len() >= max_lines {
                 return out;
             }
             current.push_str(word);
         }
+        if !current.is_empty() {
+            out.push(if *quoted {
+                ContentLine::Quote(current)
+            } else {
+                ContentLine::Normal(current)
+            });
+            if out.len() >= max_lines {
+                return out;
+            }
+        }
     }
 
-    if !current.is_empty() {
-        out.push(current);
-    }
     if out.is_empty() {
-        out.push(String::new());
+        out.push(ContentLine::Normal(String::new()));
     }
     out
 }

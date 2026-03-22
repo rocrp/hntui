@@ -104,6 +104,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         desc_style,
     ));
     lines.push(kv(
+        "y",
+        "copy selected comment to clipboard",
+        key_style,
+        desc_style,
+    ));
+    lines.push(kv(
         "o",
         "open comments page (browser)",
         key_style,

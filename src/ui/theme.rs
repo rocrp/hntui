@@ -355,27 +355,6 @@ pub(crate) fn rainbow_depth(depth: usize) -> Color {
     colors[idx]
 }
 
-/// Returns foreground color based on line position (stable hue) and distance from focus (dim).
-/// - line_index: determines the rainbow hue (stable, doesn't change with navigation)
-/// - distance: determines brightness (0 = near focus = bright, larger = dimmer)
-pub(crate) fn focus_gradient_fg(
-    line_index: usize,
-    distance: usize,
-    half_viewport: usize,
-) -> Option<Color> {
-    // Stable rainbow hue based on line position (not distance)
-    let hue_pos = (line_index as f64 * 0.08) % 1.0;
-    let rainbow_color = rainbow(hue_pos);
-
-    // Dim based on distance from focus
-    let max_dist = half_viewport.max(1) as f64;
-    let fade = (distance as f64 / max_dist).min(1.0);
-
-    // Blend toward subtext0 for dark-mode readability
-    let dimmed = blend(rainbow_color, palette().subtext0, fade * 0.5);
-    Some(dimmed)
-}
-
 /// Returns foreground color for story based on row position, importance, and focus distance.
 /// - row_index: determines rainbow hue (stable)
 /// - importance: 0.0-1.0 from score/comments (higher = brighter/more saturated)
