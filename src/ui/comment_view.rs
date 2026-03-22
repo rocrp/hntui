@@ -31,7 +31,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .areas(inner);
 
-    app.layout_areas = LayoutAreas { list_area, frame_area: area };
+    app.layout_areas = LayoutAreas {
+        list_area,
+        frame_area: area,
+    };
     let layout = theme::layout();
     let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
     let content_width = list_area.width as usize;
@@ -96,47 +99,46 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 .unwrap_or_else(|| "?".to_string());
 
             let author_style = Style::default()
-                .fg(theme::palette().subtext0)
-                .add_modifier(Modifier::ITALIC);
+                .fg(theme::comment_indent_color(comment.depth))
+                .add_modifier(Modifier::BOLD);
             let content_style = Style::default().fg(theme::palette().text);
-            let tail_style = Style::default().fg(theme::palette().overlay0);
+            let meta_style = Style::default().fg(theme::palette().overlay0);
 
-            let tail = if comment.dead && !comment.deleted {
-                format!(" [dead] | {age}")
-            } else {
-                format!(" | {age}")
-            };
-            let tail_width = tail.chars().count();
-
-            let prefix_width = indent_width + 2 + by.chars().count() + 2;
-            let first_width = content_width
-                .saturating_sub(prefix_width)
-                .saturating_sub(tail_width);
-            let next_width = content_width
-                .saturating_sub(indent_width)
-                .saturating_sub(2)
-                .max(1);
-
-            let plain = hn_html_to_plain(&comment.text);
-            let wrapped = wrap_plain(&plain, first_width.max(1), next_width, comment_max_lines);
-            let header_content = wrapped.first().cloned().unwrap_or_default();
-
-            let mut lines = Vec::with_capacity(wrapped.len());
-            lines.push(Line::from(vec![
+            // Header line: [indent][marker] author · age
+            let mut header_spans = vec![
                 Span::styled(indent.clone(), indent_style),
                 Span::styled(format!("{thread_marker} "), marker_style),
                 Span::styled(by, author_style),
-                Span::raw(": "),
-                Span::styled(header_content, content_style),
-                Span::styled(tail, tail_style),
-            ]));
+                Span::styled(format!(" · {age}"), meta_style),
+            ];
+            if comment.dead && !comment.deleted {
+                header_spans.push(Span::styled(
+                    " [dead]",
+                    Style::default().fg(theme::palette().red),
+                ));
+            }
 
-            for line in wrapped.into_iter().skip(1) {
-                lines.push(Line::from(vec![
-                    Span::styled(indent.clone(), indent_style),
-                    Span::raw("  "),
-                    Span::styled(line, content_style),
-                ]));
+            let mut lines = Vec::new();
+            lines.push(Line::from(header_spans));
+
+            // Body lines: content on dedicated rows below header
+            let body_indent = format!("{indent}  ");
+            let body_width = content_width.saturating_sub(indent_width + 2).max(1);
+            let plain = hn_html_to_plain(&comment.text);
+
+            if !plain.is_empty() {
+                let wrapped = wrap_plain(&plain, body_width, comment_max_lines);
+                for wline in wrapped {
+                    if wline.is_empty() {
+                        // Paragraph separator
+                        lines.push(Line::from(Span::styled(body_indent.clone(), indent_style)));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled(body_indent.clone(), indent_style),
+                            Span::styled(wline, content_style),
+                        ]));
+                    }
+                }
             }
 
             if lines.is_empty() {
@@ -278,12 +280,27 @@ pub(crate) fn hn_html_to_plain(html: &str) -> String {
     }
 
     let decoded = decode_html_entities(&stripped).into_owned();
-    decoded
-        .lines()
-        .map(|line| collapse_spaces(line.trim()))
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+
+    // Preserve paragraph breaks: collapse consecutive empty lines to exactly one
+    let mut result = Vec::new();
+    let mut prev_empty = false;
+    for line in decoded.lines() {
+        let trimmed = collapse_spaces(line.trim());
+        if trimmed.is_empty() {
+            if !prev_empty && !result.is_empty() {
+                result.push(String::new());
+                prev_empty = true;
+            }
+        } else {
+            result.push(trimmed);
+            prev_empty = false;
+        }
+    }
+    // Remove trailing empty lines
+    while result.last().is_some_and(|s| s.is_empty()) {
+        result.pop();
+    }
+    result.join("\n")
 }
 
 fn collapse_spaces(s: &str) -> String {
@@ -303,10 +320,11 @@ fn collapse_spaces(s: &str) -> String {
     out
 }
 
-fn wrap_plain(s: &str, first_width: usize, next_width: usize, max_lines: usize) -> Vec<String> {
+fn wrap_plain(s: &str, width: usize, max_lines: usize) -> Vec<String> {
     if max_lines == 0 {
         return vec![String::new()];
     }
+    let width = width.max(1);
 
     let mut out = Vec::new();
     let mut current = String::new();
@@ -314,23 +332,21 @@ fn wrap_plain(s: &str, first_width: usize, next_width: usize, max_lines: usize) 
     for raw_line in s.split('\n') {
         let line = collapse_spaces(raw_line.trim());
         if line.is_empty() {
+            // Paragraph break: flush current buffer, then add empty line as separator
             if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
                 if out.len() >= max_lines {
                     return out;
                 }
             }
+            out.push(String::new());
+            if out.len() >= max_lines {
+                return out;
+            }
             continue;
         }
 
         for word in line.split_whitespace() {
-            let width = if out.is_empty() {
-                first_width
-            } else {
-                next_width
-            };
-            let width = width.max(1);
-
             if current.is_empty() {
                 current.push_str(word);
                 continue;
@@ -349,15 +365,11 @@ fn wrap_plain(s: &str, first_width: usize, next_width: usize, max_lines: usize) 
             }
             current.push_str(word);
         }
-
-        if !current.is_empty() {
-            out.push(std::mem::take(&mut current));
-            if out.len() >= max_lines {
-                return out;
-            }
-        }
     }
 
+    if !current.is_empty() {
+        out.push(current);
+    }
     if out.is_empty() {
         out.push(String::new());
     }
