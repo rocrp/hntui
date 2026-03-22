@@ -88,7 +88,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             "No stories loaded. Press r to refresh.",
         ))]
     } else {
-        // Pre-collect data to avoid borrow conflicts with story_list_state
         let story_data: Vec<_> = (0..visible_count)
             .map(|idx| {
                 let story_idx = if use_filter {
@@ -153,7 +152,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     if app.search_active {
                         spans.push(Span::styled(
                             format!(" {}", format_age(time, now)),
-                            Style::default().fg(theme::palette().subtext0),
+                            theme::HINT,
                         ));
                     }
 
@@ -172,9 +171,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let list = List::new(items).highlight_symbol("").highlight_style(
-        Style::default()
-            .bg(theme::palette().surface2)
-            .add_modifier(Modifier::BOLD),
+        theme::SELECTED.add_modifier(Modifier::BOLD),
     );
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
 
@@ -185,12 +182,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let meta = if app.filter_input_active {
         let cursor = format!("Filter: {}│", app.keyword_filter);
         Line::from(vec![
-            Span::styled(
-                cursor,
-                Style::default()
-                    .fg(theme::palette().text)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(cursor, theme::KEY),
             Span::raw("  "),
             Span::styled(
                 if app.keyword_filter.is_empty() {
@@ -198,28 +190,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 } else {
                     "Enter:apply  Esc:clear"
                 },
-                Style::default().fg(theme::palette().subtext0),
+                theme::HINT,
             ),
         ])
     } else if app.search_input_active {
         let cursor = format!("/ {}│", app.search_query);
         Line::from(vec![
-            Span::styled(
-                cursor,
-                Style::default()
-                    .fg(theme::palette().text)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(cursor, theme::KEY),
             Span::raw("  "),
-            Span::styled(
-                "Enter:search  Esc:cancel",
-                Style::default().fg(theme::palette().subtext0),
-            ),
+            Span::styled("Enter:search  Esc:cancel", theme::HINT),
         ])
     } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
-            Style::default().fg(theme::palette().red),
+            theme::ERROR,
         )])
     } else if let Some(story) = app.selected_story() {
         let age = format_age(story.time, now);
@@ -233,10 +217,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut spans = vec![
             Span::styled(format!("{} pts", story.score), score_style),
             Span::raw(format!(" by {} ", story.by)),
-            Span::styled(
-                format!("{age}"),
-                Style::default().fg(theme::palette().subtext0),
-            ),
+            Span::styled(format!("{age}"), theme::HINT),
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];
@@ -245,7 +226,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             spans.push(Span::styled(
                 "loading more…",
                 Style::default()
-                    .fg(theme::palette().subtext0)
+                    .fg(theme::SUBTEXT0)
                     .add_modifier(Modifier::ITALIC),
             ));
         }

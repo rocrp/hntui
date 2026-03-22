@@ -1,382 +1,182 @@
-use anyhow::{anyhow, ensure, Context, Result};
-use ratatui::style::Color;
-use serde::Deserialize;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use ratatui::style::{Color, Modifier, Style};
 
-static THEME: OnceLock<Theme> = OnceLock::new();
-const DEFAULT_UI_CONFIG_TOML: &str = include_str!("../../ui-config.toml");
-const EINK_UI_CONFIG_TOML: &str = include_str!("../../ui-config-eink.toml");
 const COMMENT_INDENT_BLEND: f64 = 0.35;
 
-#[derive(Debug, Clone)]
-pub(crate) struct Theme {
-    pub(crate) palette: Palette,
-    pub(crate) layout: Layout,
-    pub(crate) score_scale: Scale,
-    pub(crate) comment_scale: Scale,
+const fn hex(rgb: u32) -> Color {
+    Color::Rgb(
+        ((rgb >> 16) & 0xff) as u8,
+        ((rgb >> 8) & 0xff) as u8,
+        (rgb & 0xff) as u8,
+    )
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) struct Palette {
-    pub(crate) surface2: Color,
-    pub(crate) overlay0: Color,
-    pub(crate) subtext0: Color,
-    pub(crate) subtext1: Color,
-    pub(crate) text: Color,
-    pub(crate) blue: Color,
-    pub(crate) sapphire: Color,
-    pub(crate) sky: Color,
-    pub(crate) teal: Color,
-    pub(crate) green: Color,
-    pub(crate) yellow: Color,
-    pub(crate) peach: Color,
-    pub(crate) red: Color,
-    pub(crate) mauve: Color,
-    pub(crate) pink: Color,
-    pub(crate) rainbow: Vec<Color>,
-}
+// Catppuccin Frappé palette
+pub(crate) const SURFACE2: Color = hex(0x414559);
+pub(crate) const OVERLAY0: Color = hex(0x737994);
+pub(crate) const SUBTEXT0: Color = hex(0xA5ADCE);
+pub(crate) const SUBTEXT1: Color = hex(0xB5BFE2);
+pub(crate) const TEXT: Color = hex(0xC6D0F5);
+pub(crate) const BLUE: Color = hex(0x8CAAEE);
+pub(crate) const TEAL: Color = hex(0x81C8BE);
+pub(crate) const GREEN: Color = hex(0xA6D189);
+pub(crate) const RED: Color = hex(0xE78284);
+pub(crate) const MAUVE: Color = hex(0xCA9EE6);
 
-#[derive(Debug, Clone)]
-pub(crate) struct Layout {
-    pub(crate) comment_max_lines: Option<usize>,
-    pub(crate) comment_default_visible_levels: usize,
-}
+const RAINBOW: [Color; 10] = [
+    hex(0x8CAAEE), // blue
+    hex(0x85C1DC), // sapphire
+    hex(0x99D1DB), // sky
+    hex(0x81C8BE), // teal
+    hex(0xA6D189), // green
+    hex(0xE5C890), // yellow
+    hex(0xEF9F76), // peach
+    hex(0xE78284), // red
+    hex(0xCA9EE6), // mauve
+    hex(0xF4B8E4), // pink
+];
 
-#[derive(Debug, Clone)]
-pub(crate) struct Scale {
-    steps: Vec<ScaleStep>,
-}
+// Layout constants
+pub(crate) const COMMENT_MAX_LINES: Option<usize> = None;
+pub(crate) const COMMENT_DEFAULT_VISIBLE_LEVELS: usize = 2;
 
-#[derive(Debug, Clone)]
+// Score/comment heat-map scales (descending threshold, last must be 0)
 struct ScaleStep {
     min: i64,
     color: Color,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ThemeConfig {
-    layout: LayoutConfig,
-    palette: PaletteConfig,
-    score_scale: ScaleConfig,
-    comment_scale: ScaleConfig,
+const SCORE_SCALE: [ScaleStep; 5] = [
+    ScaleStep { min: 500, color: hex(0x9F633F) },
+    ScaleStep { min: 250, color: hex(0x925B3B) },
+    ScaleStep { min: 100, color: hex(0x855337) },
+    ScaleStep { min: 50,  color: hex(0x5F433A) },
+    ScaleStep { min: 0,   color: hex(0x3F2E2B) },
+];
+
+const COMMENT_SCALE: [ScaleStep; 5] = [
+    ScaleStep { min: 300, color: hex(0x5F76A4) },
+    ScaleStep { min: 200, color: hex(0x586E9A) },
+    ScaleStep { min: 100, color: hex(0x516690) },
+    ScaleStep { min: 50,  color: hex(0x45526E) },
+    ScaleStep { min: 0,   color: hex(0x353E5B) },
+];
+
+// ── Semantic styles (shared across all views) ────────────────────────
+
+/// Popup background
+pub(crate) const POPUP: Style = Style::new().bg(SURFACE2);
+/// Bold primary text (popup titles, keys)
+pub(crate) const HEADER: Style = Style::new().fg(TEXT).add_modifier(Modifier::BOLD);
+/// Accent header (summary overlay title)
+pub(crate) const HEADER_ACCENT: Style = Style::new().fg(MAUVE).add_modifier(Modifier::BOLD);
+/// Hint / secondary help text
+pub(crate) const HINT: Style = Style::new().fg(SUBTEXT0);
+/// Keyboard shortcut labels
+pub(crate) const KEY: Style = Style::new().fg(TEXT).add_modifier(Modifier::BOLD);
+/// Low-emphasis label
+pub(crate) const LABEL: Style = Style::new().fg(SUBTEXT1);
+/// Normal-emphasis value
+pub(crate) const VALUE: Style = Style::new().fg(TEXT);
+/// Purple accent (active section, cursor in popup)
+pub(crate) const ACCENT: Style = Style::new().fg(MAUVE).add_modifier(Modifier::BOLD);
+/// Green success flash ("Copied!", "Saved!")
+pub(crate) const SUCCESS: Style = Style::new().fg(GREEN).add_modifier(Modifier::BOLD);
+/// Error text
+pub(crate) const ERROR: Style = Style::new().fg(RED);
+/// Subtle metadata (overlay0)
+pub(crate) const META: Style = Style::new().fg(OVERLAY0);
+/// Selected-item highlight bg
+pub(crate) const SELECTED: Style = Style::new().bg(SURFACE2);
+/// Block quote text
+pub(crate) const QUOTE: Style = Style::new().fg(SUBTEXT0).add_modifier(Modifier::ITALIC);
+/// Block quote bar
+pub(crate) const QUOTE_BAR: Style = Style::new().fg(OVERLAY0);
+/// Inline / fenced code
+pub(crate) const CODE: Style = Style::new().fg(TEAL);
+/// List bullet / number
+pub(crate) const LIST_MARKER: Style = Style::new().fg(BLUE);
+/// Block cursor in editing mode
+pub(crate) const BLOCK_CURSOR: Style = Style::new().fg(SURFACE2).bg(GREEN);
+
+pub(crate) fn section_heading(active: bool) -> Style {
+    if active { ACCENT } else { Style::new().fg(SUBTEXT0).add_modifier(Modifier::BOLD) }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LayoutConfig {
-    comment_max_lines: i64,
-    comment_default_visible_levels: usize,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PaletteConfig {
-    surface2: String,
-    overlay0: String,
-    subtext0: String,
-    subtext1: String,
-    text: String,
-    blue: String,
-    sapphire: String,
-    sky: String,
-    teal: String,
-    green: String,
-    yellow: String,
-    peach: String,
-    red: String,
-    mauve: String,
-    pink: String,
-    rainbow: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScaleConfig {
-    steps: Vec<ScaleStepConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ScaleStepConfig {
-    min: i64,
-    color: String,
-}
-
-/// Initialize from a built-in theme name (e.g. "eink").
-pub(crate) fn init_builtin(name: &str) -> Result<()> {
-    let toml = match name {
-        "default" => DEFAULT_UI_CONFIG_TOML,
-        "eink" => EINK_UI_CONFIG_TOML,
-        _ => return Err(anyhow!("unknown theme: {name}; available: default, eink")),
-    };
-    init_from_str(&format!("built-in theme '{name}'"), toml)
-}
-
-pub(crate) fn init_from_candidates(
-    paths: &[PathBuf],
-    allow_default: bool,
-) -> Result<Option<PathBuf>> {
-    ensure!(
-        !paths.is_empty(),
-        "ui config search paths must be non-empty"
-    );
-    for path in paths {
-        if !path.exists() {
-            continue;
-        }
-        init_from_path(path)?;
-        return Ok(Some(path.clone()));
-    }
-
-    if allow_default {
-        init_from_str("built-in ui config", DEFAULT_UI_CONFIG_TOML)?;
-        return Ok(None);
-    }
-
-    let tried = paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(anyhow!("ui config not found; tried: {tried}"))
-}
-
-fn init_from_path(path: &Path) -> Result<()> {
-    let contents =
-        fs::read_to_string(path).with_context(|| format!("read ui config {}", path.display()))?;
-    init_from_str(&format!("ui config {}", path.display()), &contents)
-}
-
-fn init_from_str(label: &str, contents: &str) -> Result<()> {
-    let raw: toml::Value =
-        toml::from_str(contents).with_context(|| format!("parse {label} toml"))?;
-    if raw.get("font").is_some() {
-        return Err(anyhow!(
-            "ui config no longer supports [font]; remove the [font] section and set font in your terminal emulator"
-        ));
-    }
-    let config: ThemeConfig = raw
-        .try_into()
-        .with_context(|| format!("decode {label} toml"))?;
-    let theme = Theme::from_config(config)?;
-    THEME
-        .set(theme)
-        .map_err(|_| anyhow!("ui theme already initialized"))?;
-    Ok(())
-}
-
-pub(crate) fn palette() -> &'static Palette {
-    &theme().palette
-}
-
-pub(crate) fn layout() -> &'static Layout {
-    &theme().layout
-}
+// ── Scale helpers ────────────────────────────────────────────────────
 
 pub(crate) fn score_color(score: i64) -> Color {
-    theme().score_scale.color_for(score)
+    scale_color(score, &SCORE_SCALE)
 }
 
 pub(crate) fn comment_color(comments: i64) -> Color {
-    theme().comment_scale.color_for(comments)
-}
-
-pub(crate) fn comment_indent_color(depth: usize) -> Color {
-    let accent = rainbow_depth(depth);
-    blend(theme().palette.overlay0, accent, COMMENT_INDENT_BLEND)
+    scale_color(comments, &COMMENT_SCALE)
 }
 
 pub(crate) fn score_level(score: i64) -> f64 {
-    theme().score_scale.level_for(score)
+    scale_level(score, &SCORE_SCALE)
 }
 
 pub(crate) fn comment_level(comments: i64) -> f64 {
-    theme().comment_scale.level_for(comments)
+    scale_level(comments, &COMMENT_SCALE)
 }
 
-fn theme() -> &'static Theme {
-    THEME
-        .get()
-        .expect("ui theme not initialized: call theme::init_from_path()")
-}
-
-impl Theme {
-    fn from_config(config: ThemeConfig) -> Result<Self> {
-        let comment_max_lines = if config.layout.comment_max_lines == -1 {
-            None
-        } else {
-            ensure!(
-                config.layout.comment_max_lines > 0,
-                "layout.comment_max_lines must be > 0 or -1"
-            );
-            let value = usize::try_from(config.layout.comment_max_lines)
-                .with_context(|| "layout.comment_max_lines overflow")?;
-            Some(value)
-        };
-        ensure!(
-            config.layout.comment_default_visible_levels > 0,
-            "layout.comment_default_visible_levels must be > 0"
-        );
-
-        let palette = Palette::from_config(config.palette)?;
-        let layout = Layout {
-            comment_max_lines,
-            comment_default_visible_levels: config.layout.comment_default_visible_levels,
-        };
-        let score_scale = Scale::from_config("score_scale", config.score_scale)?;
-        let comment_scale = Scale::from_config("comment_scale", config.comment_scale)?;
-
-        Ok(Self {
-            palette,
-            layout,
-            score_scale,
-            comment_scale,
-        })
-    }
-}
-
-impl Palette {
-    fn from_config(config: PaletteConfig) -> Result<Self> {
-        let rainbow = parse_color_list("palette.rainbow", &config.rainbow)?;
-        ensure!(!rainbow.is_empty(), "palette.rainbow must be non-empty");
-        Ok(Self {
-            surface2: parse_hex_color("palette.surface2", &config.surface2)?,
-            overlay0: parse_hex_color("palette.overlay0", &config.overlay0)?,
-            subtext0: parse_hex_color("palette.subtext0", &config.subtext0)?,
-            subtext1: parse_hex_color("palette.subtext1", &config.subtext1)?,
-            text: parse_hex_color("palette.text", &config.text)?,
-            blue: parse_hex_color("palette.blue", &config.blue)?,
-            sapphire: parse_hex_color("palette.sapphire", &config.sapphire)?,
-            sky: parse_hex_color("palette.sky", &config.sky)?,
-            teal: parse_hex_color("palette.teal", &config.teal)?,
-            green: parse_hex_color("palette.green", &config.green)?,
-            yellow: parse_hex_color("palette.yellow", &config.yellow)?,
-            peach: parse_hex_color("palette.peach", &config.peach)?,
-            red: parse_hex_color("palette.red", &config.red)?,
-            mauve: parse_hex_color("palette.mauve", &config.mauve)?,
-            pink: parse_hex_color("palette.pink", &config.pink)?,
-            rainbow,
-        })
-    }
-}
-
-impl Scale {
-    fn from_config(label: &str, config: ScaleConfig) -> Result<Self> {
-        ensure!(!config.steps.is_empty(), "{label}.steps must be non-empty");
-        let mut steps = Vec::with_capacity(config.steps.len());
-        let mut prev_min: Option<i64> = None;
-        for (idx, step) in config.steps.into_iter().enumerate() {
-            ensure!(step.min >= 0, "{label}.steps[{idx}].min must be >= 0");
-            if let Some(prev) = prev_min {
-                ensure!(
-                    step.min < prev,
-                    "{label}.steps[{idx}].min must be < previous min {prev}"
-                );
-            }
-            let color = parse_hex_color(&format!("{label}.steps[{idx}].color"), &step.color)?;
-            steps.push(ScaleStep {
-                min: step.min,
-                color,
-            });
-            prev_min = Some(step.min);
+fn scale_color(value: i64, steps: &[ScaleStep]) -> Color {
+    for step in steps {
+        if value >= step.min {
+            return step.color;
         }
-        let last = steps.last().expect("scale steps non-empty");
-        ensure!(last.min == 0, "{label}.steps last min must be 0");
-        Ok(Self { steps })
     }
-
-    fn color_for(&self, value: i64) -> Color {
-        for step in &self.steps {
-            if value >= step.min {
-                return step.color;
-            }
-        }
-        self.steps
-            .last()
-            .expect("scale steps must be non-empty")
-            .color
-    }
-
-    fn level_for(&self, value: i64) -> f64 {
-        let idx = self
-            .steps
-            .iter()
-            .position(|step| value >= step.min)
-            .unwrap_or(self.steps.len().saturating_sub(1));
-        if self.steps.len() == 1 {
-            return 1.0;
-        }
-        let denom = (self.steps.len() - 1) as f64;
-        (1.0 - (idx as f64 / denom)).clamp(0.0, 1.0)
-    }
+    steps.last().expect("scale non-empty").color
 }
 
-fn parse_color_list(label: &str, values: &[String]) -> Result<Vec<Color>> {
-    values
+fn scale_level(value: i64, steps: &[ScaleStep]) -> f64 {
+    let idx = steps
         .iter()
-        .enumerate()
-        .map(|(idx, value)| parse_hex_color(&format!("{label}[{idx}]"), value))
-        .collect::<Result<Vec<_>>>()
+        .position(|step| value >= step.min)
+        .unwrap_or(steps.len().saturating_sub(1));
+    if steps.len() == 1 {
+        return 1.0;
+    }
+    let denom = (steps.len() - 1) as f64;
+    (1.0 - (idx as f64 / denom)).clamp(0.0, 1.0)
 }
 
-fn parse_hex_color(label: &str, value: &str) -> Result<Color> {
-    let hex = value.trim();
-    let hex = hex.strip_prefix('#').unwrap_or(hex);
-    ensure!(hex.len() == 6, "{label} must be 6-digit hex (got {value})");
-    let r = u8::from_str_radix(&hex[0..2], 16)
-        .with_context(|| format!("{label} invalid red channel {value}"))?;
-    let g = u8::from_str_radix(&hex[2..4], 16)
-        .with_context(|| format!("{label} invalid green channel {value}"))?;
-    let b = u8::from_str_radix(&hex[4..6], 16)
-        .with_context(|| format!("{label} invalid blue channel {value}"))?;
-    Ok(Color::Rgb(r, g, b))
+// ── Rainbow / gradient helpers ───────────────────────────────────────
+
+pub(crate) fn comment_indent_color(depth: usize) -> Color {
+    let accent = rainbow_depth(depth);
+    blend(OVERLAY0, accent, COMMENT_INDENT_BLEND)
 }
 
 pub(crate) fn rainbow(level: f64) -> Color {
     let level = level.clamp(0.0, 1.0);
-    let colors = &theme().palette.rainbow;
-    let max_idx = colors.len() - 1;
+    let max_idx = RAINBOW.len() - 1;
     let pos = level * (max_idx as f64);
     let idx = pos.floor() as usize;
     if idx >= max_idx {
-        return colors[max_idx];
+        return RAINBOW[max_idx];
     }
     let t = pos - (idx as f64);
-    blend(colors[idx], colors[idx + 1], t)
+    blend(RAINBOW[idx], RAINBOW[idx + 1], t)
 }
 
 pub(crate) fn rainbow_depth(depth: usize) -> Color {
-    let colors = &theme().palette.rainbow;
-    let idx = (depth.saturating_mul(3)) % colors.len();
-    colors[idx]
+    let idx = (depth.saturating_mul(3)) % RAINBOW.len();
+    RAINBOW[idx]
 }
 
-/// Returns foreground color for story based on row position, importance, and focus distance.
-/// - row_index: determines rainbow hue (stable)
-/// - importance: 0.0-1.0 from score/comments (higher = brighter/more saturated)
-/// - distance: from focus (0 = selected, higher = dimmer)
+/// Story foreground based on row position, importance, and distance from selection.
 pub(crate) fn story_gradient_fg(
     row_index: usize,
     importance: f64,
     distance: usize,
     half_viewport: usize,
 ) -> Color {
-    // Stable rainbow hue based on row position
     let hue_pos = (row_index as f64 * 0.1) % 1.0;
     let rainbow_color = rainbow(hue_pos);
 
-    // Saturation range: 20% to 95% (low importance = less rainbow, high = vibrant)
     let saturation = 0.2 + (importance * 0.75);
-
-    // Use subtext0 as base (brighter), importance affects saturation not base
-    let base_color = palette().subtext0;
-
-    // Blend base with rainbow based on saturation
-    let importance_adjusted = blend(base_color, rainbow_color, saturation);
+    let importance_adjusted = blend(SUBTEXT0, rainbow_color, saturation);
 
     if distance == 0 {
         return importance_adjusted;
@@ -384,14 +184,11 @@ pub(crate) fn story_gradient_fg(
 
     let max_dist = half_viewport.max(1) as f64;
     let fade = (distance as f64 / max_dist).min(1.0);
-
-    // Dim based on distance, high importance dims less (like comments)
-    // Use subtext0 as fade target (brighter than overlay0)
     let dim_factor = fade * (0.5 - importance * 0.2);
-    blend(importance_adjusted, palette().subtext0, dim_factor)
+    blend(importance_adjusted, SUBTEXT0, dim_factor)
 }
 
-/// Darken a color by blending it toward black. Non-RGB colors get a dark fallback.
+/// Darken a color by blending toward black.
 pub(crate) fn dim_color(color: Color, factor: f64) -> Color {
     match color {
         Color::Rgb(r, g, b) => blend(Color::Rgb(r, g, b), Color::Rgb(0, 0, 0), factor),
@@ -403,11 +200,7 @@ pub(crate) fn blend(a: Color, b: Color, t: f64) -> Color {
     let (ar, ag, ab) = rgb_components(a);
     let (br, bg, bb) = rgb_components(b);
     let t = t.clamp(0.0, 1.0);
-
-    let r = lerp_u8(ar, br, t);
-    let g = lerp_u8(ag, bg, t);
-    let b = lerp_u8(ab, bb, t);
-    Color::Rgb(r, g, b)
+    Color::Rgb(lerp_u8(ar, br, t), lerp_u8(ag, bg, t), lerp_u8(ab, bb, t))
 }
 
 fn rgb_components(color: Color) -> (u8, u8, u8) {

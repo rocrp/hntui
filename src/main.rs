@@ -55,14 +55,6 @@ pub struct Cli {
     #[arg(long)]
     pub base_url: Option<String>,
 
-    /// Built-in theme name: "default", "eink". Conflicts with --ui-config.
-    #[arg(long)]
-    pub theme: Option<String>,
-
-    /// UI config file path (optional; will search defaults).
-    #[arg(long, conflicts_with = "theme")]
-    pub ui_config: Option<PathBuf>,
-
     /// Plugin config file path (optional; will search defaults).
     #[arg(long)]
     pub plugin_config: Option<PathBuf>,
@@ -98,9 +90,6 @@ impl Cli {
         self.resolved_backend()?;
         if let Some(url) = &self.base_url {
             anyhow::ensure!(!url.trim().is_empty(), "--base-url must be non-empty");
-        }
-        if let Some(path) = &self.ui_config {
-            anyhow::ensure!(!path.as_os_str().is_empty(), "--ui-config must be non-empty");
         }
         if let Some(path) = &self.log_file {
             anyhow::ensure!(!path.as_os_str().is_empty(), "--log-file must be non-empty");
@@ -151,10 +140,6 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-fn ui_config_candidates(cli: &Cli) -> Vec<PathBuf> {
-    config_candidates(cli.ui_config.as_ref(), "ui-config.toml")
-}
-
 fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
     if cli.plugin_config.is_some() {
         return config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml");
@@ -184,14 +169,6 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
     logging::init(cli.log_file.clone()).context("init logging")?;
-    if let Some(theme_name) = &cli.theme {
-        ui::theme::init_builtin(theme_name).with_context(|| "load built-in theme")?;
-    } else {
-        let ui_candidates = ui_config_candidates(&cli);
-        let allow_default = cli.ui_config.is_none();
-        ui::theme::init_from_candidates(&ui_candidates, allow_default)
-            .with_context(|| "load ui config")?;
-    }
 
     let plugin_candidates = plugin_config_candidates(&cli);
     let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)

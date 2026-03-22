@@ -1710,7 +1710,7 @@ impl App {
     }
 
     fn apply_default_comment_expansion(&mut self) {
-        let visible_levels = theme::layout().comment_default_visible_levels;
+        let visible_levels = theme::COMMENT_DEFAULT_VISIBLE_LEVELS;
         let expand_depth_exclusive = visible_levels.saturating_sub(1);
 
         fn walk(nodes: &mut [CommentNode], expand_depth_exclusive: usize) {

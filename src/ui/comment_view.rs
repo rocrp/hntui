@@ -35,12 +35,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         list_area,
         frame_area: area,
     };
-    let layout = theme::layout();
-    let comment_max_lines = layout.comment_max_lines.unwrap_or(usize::MAX);
+    let comment_max_lines = theme::COMMENT_MAX_LINES.unwrap_or(usize::MAX);
     let content_width = list_area.width as usize;
-
-    // Avoid BOLD for selection: many terminals render it as "bright" which effectively shifts colors.
-    let highlight_style = Style::default().bg(theme::palette().surface2);
 
     if app.comment_loading && app.comment_list.is_empty() {
         app.comment_item_heights.clear();
@@ -51,7 +47,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let items = vec![ListItem::new(Line::from(format!("Loading {spinner}")))];
         let list = List::new(items)
             .highlight_symbol("")
-            .highlight_style(highlight_style);
+            .highlight_style(theme::SELECTED);
         frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
     } else if app.comment_list.is_empty() {
         app.comment_item_heights.clear();
@@ -62,7 +58,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let items = vec![ListItem::new(Line::from("No comments."))];
         let list = List::new(items)
             .highlight_symbol("")
-            .highlight_style(highlight_style);
+            .highlight_style(theme::SELECTED);
         frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
     } else {
         let now = now_unix();
@@ -101,34 +97,24 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             let author_style = Style::default()
                 .fg(theme::comment_indent_color(comment.depth))
                 .add_modifier(Modifier::BOLD);
-            let content_style = Style::default().fg(theme::palette().text);
-            let meta_style = Style::default().fg(theme::palette().overlay0);
 
-            // Header line: [indent][marker] author · age
             let mut header_spans = vec![
                 Span::styled(indent.clone(), indent_style),
                 Span::styled(format!("{thread_marker} "), marker_style),
                 Span::styled(by, author_style),
-                Span::styled(format!(" · {age}"), meta_style),
+                Span::styled(format!(" · {age}"), theme::META),
             ];
             if comment.dead && !comment.deleted {
-                header_spans.push(Span::styled(
-                    " [dead]",
-                    Style::default().fg(theme::palette().red),
-                ));
+                header_spans.push(Span::styled(" [dead]", theme::ERROR));
             }
 
             let mut lines = Vec::new();
             lines.push(Line::from(header_spans));
 
-            // Body lines: content on dedicated rows below header
             let body_indent = format!("{indent}  ");
             let body_width = content_width.saturating_sub(indent_width + 2).max(1);
             let plain = hn_html_to_plain(&comment.text);
-            let quote_style = Style::default()
-                .fg(theme::palette().subtext0)
-                .add_modifier(Modifier::ITALIC);
-            let quote_bar_style = Style::default().fg(theme::palette().overlay0);
+            let content_style = Style::default().fg(theme::TEXT);
 
             if !plain.is_empty() {
                 let wrapped = wrap_content(&plain, body_width, comment_max_lines);
@@ -143,8 +129,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         ContentLine::Quote(text) => {
                             lines.push(Line::from(vec![
                                 Span::styled(body_indent.clone(), indent_style),
-                                Span::styled("▎ ", quote_bar_style),
-                                Span::styled(text, quote_style),
+                                Span::styled("▎ ", theme::QUOTE_BAR),
+                                Span::styled(text, theme::QUOTE),
                             ]));
                         }
                         ContentLine::Blank => {
@@ -166,7 +152,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|lines| lines.len().max(1))
             .collect();
 
-        // Build cumulative line starts for gradient calculation
         let mut line_starts = Vec::with_capacity(app.comment_item_heights.len() + 1);
         line_starts.push(0usize);
         let mut cumsum = 0usize;
@@ -202,13 +187,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         let mut visible_lines = Vec::with_capacity(end.saturating_sub(start));
         let mut line_idx = 0usize;
-        let dim_target = theme::palette().overlay0;
+        let dim_target = theme::OVERLAY0;
         'outer: for (idx, lines) in comment_lines.iter().enumerate() {
             for (line_in_comment, line) in lines.iter().enumerate() {
                 if line_idx >= start && line_idx < end {
                     let mut line = line.clone();
-                    // Distance-based dimming: preserve each span's original color identity,
-                    // just fade toward overlay0 with distance from selected comment.
                     let dist = if line_idx < sel_start {
                         sel_start - line_idx
                     } else if line_idx >= sel_end {
@@ -237,9 +220,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         );
                     }
 
-                    // Highlight the header line (first line) of the selected comment.
                     if idx == selected && line_in_comment == 0 {
-                        line = line.patch_style(highlight_style);
+                        line = line.patch_style(theme::SELECTED);
                     }
                     visible_lines.push(line);
                 }
@@ -264,16 +246,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let now = now_unix();
     let show_copied = app.copied_flash.is_some_and(|t| t.elapsed().as_secs() < 2);
     let meta = if show_copied {
-        Line::from(Span::styled(
-            "Copied!",
-            Style::default()
-                .fg(theme::palette().green)
-                .add_modifier(Modifier::BOLD),
-        ))
+        Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
-            Style::default().fg(theme::palette().red),
+            theme::ERROR,
         )])
     } else if let Some(story) = app.current_story.as_ref() {
         let age = format_age(story.time, now);
@@ -315,7 +292,6 @@ pub(crate) fn hn_html_to_plain(html: &str) -> String {
 
     let decoded = decode_html_entities(&stripped).into_owned();
 
-    // Preserve paragraph breaks: collapse consecutive empty lines to exactly one
     let mut result = Vec::new();
     let mut prev_empty = false;
     for line in decoded.lines() {
@@ -330,7 +306,6 @@ pub(crate) fn hn_html_to_plain(html: &str) -> String {
             prev_empty = false;
         }
     }
-    // Remove trailing empty lines
     while result.last().is_some_and(|s| s.is_empty()) {
         result.pop();
     }
@@ -360,17 +335,13 @@ enum ContentLine {
     Blank,
 }
 
-/// Wraps plain text into structured lines, detecting `>` quoted paragraphs
-/// and preserving paragraph breaks as `Blank` separators.
 fn wrap_content(s: &str, width: usize, max_lines: usize) -> Vec<ContentLine> {
     if max_lines == 0 {
         return vec![ContentLine::Normal(String::new())];
     }
     let width = width.max(1);
-    // Quote lines get a "▎ " prefix (2 chars) so they wrap narrower
     let quote_width = width.saturating_sub(2).max(1);
 
-    // Split into paragraphs, classify each as quote or normal
     let mut paragraphs: Vec<(String, bool)> = Vec::new();
     let mut current_para = String::new();
     let mut is_quote = false;
@@ -406,7 +377,6 @@ fn wrap_content(s: &str, width: usize, max_lines: usize) -> Vec<ContentLine> {
         paragraphs.push((current_para, is_quote));
     }
 
-    // Wrap each paragraph, inserting Blank separators between them
     let mut out = Vec::new();
     for (pi, (para, quoted)) in paragraphs.iter().enumerate() {
         if pi > 0 {

@@ -1,6 +1,5 @@
 use crate::app::{App, SettingsPopup};
 use crate::ui::theme;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
@@ -15,28 +14,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
 
-    let header_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let hint_style = Style::default().fg(theme::palette().subtext0);
-    let key_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let label_style = Style::default().fg(theme::palette().subtext1);
-    let value_style = Style::default().fg(theme::palette().text);
-    let cursor_style = Style::default()
-        .fg(theme::palette().mauve)
-        .add_modifier(Modifier::BOLD);
-    let editing_style = Style::default()
-        .fg(theme::palette().green)
-        .add_modifier(Modifier::BOLD);
-
     let labels = popup.field_labels();
     let values = popup.field_values();
     let max_label_len = labels.iter().map(|l| l.len()).max().unwrap_or(0);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled("Settings", header_style)));
+    lines.push(Line::from(Span::styled("Settings", theme::HEADER)));
     lines.push(Line::raw(""));
 
     for i in 0..SettingsPopup::FIELD_COUNT {
@@ -46,10 +29,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         let padded_label = format!("{:width$}", labels[i], width = max_label_len);
 
         let display_value = if is_editing {
-            // Handled below with cursor spans
             String::new()
         } else if i == 2 && !values[i].is_empty() {
-            // Mask API key
             let v = values[i];
             if v.len() > 4 {
                 format!("{}...{}", &v[..2], &v[v.len() - 2..])
@@ -61,11 +42,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         };
 
         let style = if is_editing {
-            editing_style
+            theme::SUCCESS
         } else if is_cursor {
-            cursor_style
+            theme::ACCENT
         } else {
-            label_style
+            theme::LABEL
         };
 
         if is_editing {
@@ -75,10 +56,6 @@ pub fn render(frame: &mut Frame, app: &App) {
             let before: String = chars[..pos].iter().collect();
             let cursor_char: String;
             let after: String;
-
-            let block_cursor_style = Style::default()
-                .fg(theme::palette().surface2)
-                .bg(theme::palette().green);
 
             if pos < chars.len() {
                 cursor_char = chars[pos].to_string();
@@ -90,44 +67,38 @@ pub fn render(frame: &mut Frame, app: &App) {
 
             lines.push(Line::from(vec![
                 Span::styled(format!("{marker}{padded_label}: "), style),
-                Span::styled(before, editing_style),
-                Span::styled(cursor_char, block_cursor_style),
-                Span::styled(after, editing_style),
+                Span::styled(before, theme::SUCCESS),
+                Span::styled(cursor_char, theme::BLOCK_CURSOR),
+                Span::styled(after, theme::SUCCESS),
             ]));
         } else {
             lines.push(Line::from(vec![
                 Span::styled(format!("{marker}{padded_label}: "), style),
-                Span::styled(display_value, value_style),
+                Span::styled(display_value, theme::VALUE),
             ]));
         }
     }
 
     lines.push(Line::raw(""));
 
-    // "Saved!" flash
     let show_saved = popup
         .saved_at
         .is_some_and(|t| t.elapsed() < Duration::from_secs(2));
 
     if show_saved {
         lines.push(Line::from(vec![
-            Span::styled(
-                "Saved! ",
-                Style::default()
-                    .fg(theme::palette().green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Esc/q", key_style),
-            Span::styled(":close", hint_style),
+            Span::styled("Saved! ", theme::SUCCESS),
+            Span::styled("Esc/q", theme::KEY),
+            Span::styled(":close", theme::HINT),
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("j/k", key_style),
-            Span::styled(":nav  ", hint_style),
-            Span::styled("Enter", key_style),
-            Span::styled(":edit  ", hint_style),
-            Span::styled("Esc/q", key_style),
-            Span::styled(":close", hint_style),
+            Span::styled("j/k", theme::KEY),
+            Span::styled(":nav  ", theme::HINT),
+            Span::styled("Enter", theme::KEY),
+            Span::styled(":edit  ", theme::HINT),
+            Span::styled("Esc/q", theme::KEY),
+            Span::styled(":close", theme::HINT),
         ]));
     }
 
@@ -138,9 +109,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup_rect);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(",", header_style));
+        .title(Span::styled(",", theme::HEADER));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .style(Style::default().bg(theme::palette().surface2));
+        .style(theme::POPUP);
     frame.render_widget(paragraph, popup_rect);
 }

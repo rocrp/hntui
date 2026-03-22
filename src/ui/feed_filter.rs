@@ -1,7 +1,6 @@
 use crate::api::FeedKind;
 use crate::app::App;
 use crate::ui::theme;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -15,20 +14,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
 
-    let header_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let hint_style = Style::default().fg(theme::palette().subtext0);
-    let key_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let active_style = Style::default()
-        .fg(theme::palette().mauve)
-        .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(theme::palette().subtext1);
-
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled("Feed", header_style)));
+    lines.push(Line::from(Span::styled("Feed", theme::HEADER)));
     lines.push(Line::raw(""));
 
     for (i, &feed) in FeedKind::ALL.iter().enumerate() {
@@ -37,11 +24,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         let marker = if is_cursor { "> " } else { "  " };
         let suffix = if is_current { " *" } else { "" };
         let style = if is_cursor {
-            key_style
+            theme::KEY
         } else if is_current {
-            active_style
+            theme::ACCENT
         } else {
-            normal_style
+            theme::LABEL
         };
         lines.push(Line::from(Span::styled(
             format!("{marker}{}{suffix}", feed.label()),
@@ -51,12 +38,12 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     lines.push(Line::raw(""));
     lines.push(Line::from(vec![
-        Span::styled("j/k", key_style),
-        Span::styled(":nav  ", hint_style),
-        Span::styled("Enter", key_style),
-        Span::styled(":select  ", hint_style),
-        Span::styled("Esc", key_style),
-        Span::styled(":close", hint_style),
+        Span::styled("j/k", theme::KEY),
+        Span::styled(":nav  ", theme::HINT),
+        Span::styled("Enter", theme::KEY),
+        Span::styled(":select  ", theme::HINT),
+        Span::styled("Esc", theme::KEY),
+        Span::styled(":close", theme::HINT),
     ]));
 
     let desired_width = area.width.min(40);
@@ -66,10 +53,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup_rect);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled("f", header_style));
+        .title(Span::styled("f", theme::HEADER));
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: true })
         .block(block)
-        .style(Style::default().bg(theme::palette().surface2));
+        .style(theme::POPUP);
     frame.render_widget(paragraph, popup_rect);
 }

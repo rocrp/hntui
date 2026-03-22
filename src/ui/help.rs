@@ -1,6 +1,5 @@
 use crate::app::{App, View};
 use crate::ui::theme;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -11,115 +10,54 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
 
-    let header_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let hint_style = Style::default().fg(theme::palette().subtext1);
-    let key_style = Style::default()
-        .fg(theme::palette().text)
-        .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(theme::palette().subtext1);
-
     fn section_title(name: &str, active: bool) -> Line<'static> {
-        let style = if active {
-            Style::default()
-                .fg(theme::palette().mauve)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-                .fg(theme::palette().subtext0)
-                .add_modifier(Modifier::BOLD)
-        };
-        Line::from(Span::styled(name.to_string(), style))
+        Line::from(Span::styled(name.to_string(), theme::section_heading(active)))
     }
 
-    fn kv(keys: &str, desc: &str, key_style: Style, desc_style: Style) -> Line<'static> {
+    fn kv(keys: &str, desc: &str) -> Line<'static> {
         Line::from(vec![
-            Span::styled(format!("  {keys}"), key_style),
-            Span::styled(format!(": {desc}"), desc_style),
+            Span::styled(format!("  {keys}"), theme::KEY),
+            Span::styled(format!(": {desc}"), theme::LABEL),
         ])
     }
 
     let active = app.view;
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled("Shortcuts", header_style)));
-    lines.push(Line::from(Span::styled(
-        "Press ? or Esc to close.",
-        hint_style,
-    )));
+    lines.push(Line::from(Span::styled("Shortcuts", theme::HEADER)));
+    lines.push(Line::from(Span::styled("Press ? or Esc to close.", theme::HINT)));
     lines.push(Line::raw(""));
 
     let stories_active = active == View::Stories;
     lines.push(section_title("Stories", stories_active));
-    lines.push(kv("j/k, ↓/↑", "move", key_style, desc_style));
-    lines.push(kv("gg, G", "top / bottom", key_style, desc_style));
-    lines.push(kv(
-        "Ctrl+d / Ctrl+u",
-        "page down / up",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv(
-        "Enter / Space / l / →",
-        "open comments",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv("o", "open source link (browser)", key_style, desc_style));
-    lines.push(kv(
-        "O",
-        "open comments page (browser)",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv("/", "search stories", key_style, desc_style));
-    lines.push(kv("f", "switch feed", key_style, desc_style));
-    lines.push(kv("F", "filter by title", key_style, desc_style));
-    lines.push(kv("r", "refresh", key_style, desc_style));
-    lines.push(kv(",", "settings", key_style, desc_style));
-    lines.push(kv("q / Esc", "quit", key_style, desc_style));
+    lines.push(kv("j/k, ↓/↑", "move"));
+    lines.push(kv("gg, G", "top / bottom"));
+    lines.push(kv("Ctrl+d / Ctrl+u", "page down / up"));
+    lines.push(kv("Enter / Space / l / →", "open comments"));
+    lines.push(kv("o", "open source link (browser)"));
+    lines.push(kv("O", "open comments page (browser)"));
+    lines.push(kv("/", "search stories"));
+    lines.push(kv("f", "switch feed"));
+    lines.push(kv("F", "filter by title"));
+    lines.push(kv("r", "refresh"));
+    lines.push(kv(",", "settings"));
+    lines.push(kv("q / Esc", "quit"));
     lines.push(Line::raw(""));
 
     let comments_active = active == View::Comments;
     lines.push(section_title("Comments", comments_active));
-    lines.push(kv("j/k, ↓/↑", "move", key_style, desc_style));
-    lines.push(kv("gg, G", "top / bottom", key_style, desc_style));
-    lines.push(kv(
-        "Ctrl+d / Ctrl+u",
-        "page down / up",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv("h / ←", "collapse thread", key_style, desc_style));
-    lines.push(kv(
-        "l / →",
-        "expand thread (loads children)",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv(
-        "Enter / c",
-        "toggle collapse/expand",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv(
-        "y",
-        "copy selected comment to clipboard",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv(
-        "o",
-        "open comments page (browser)",
-        key_style,
-        desc_style,
-    ));
-    lines.push(kv("O", "open source link (browser)", key_style, desc_style));
-    lines.push(kv("s", "summarize (AI)", key_style, desc_style));
-    lines.push(kv("r", "refresh", key_style, desc_style));
-    lines.push(kv(",", "settings", key_style, desc_style));
-    lines.push(kv("q / Esc", "back", key_style, desc_style));
+    lines.push(kv("j/k, ↓/↑", "move"));
+    lines.push(kv("gg, G", "top / bottom"));
+    lines.push(kv("Ctrl+d / Ctrl+u", "page down / up"));
+    lines.push(kv("h / ←", "collapse thread"));
+    lines.push(kv("l / →", "expand thread (loads children)"));
+    lines.push(kv("Enter / c", "toggle collapse/expand"));
+    lines.push(kv("y", "copy selected comment to clipboard"));
+    lines.push(kv("o", "open comments page (browser)"));
+    lines.push(kv("O", "open source link (browser)"));
+    lines.push(kv("s", "summarize (AI)"));
+    lines.push(kv("r", "refresh"));
+    lines.push(kv(",", "settings"));
+    lines.push(kv("q / Esc", "back"));
 
     let desired_width = area.width.min(76);
     let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);
@@ -128,10 +66,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled("?", header_style));
+        .title(Span::styled("?", theme::HEADER));
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: true })
         .block(block)
-        .style(Style::default().bg(theme::palette().surface2));
+        .style(theme::POPUP);
     frame.render_widget(paragraph, popup);
 }

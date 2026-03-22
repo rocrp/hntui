@@ -16,7 +16,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
     let mut in_code_block = false;
     let mut need_paragraph_break = false;
 
-    let base_style = Style::default().fg(theme::palette().text);
+    let base_style = Style::default().fg(theme::TEXT);
 
     for event in parser {
         match event {
@@ -27,9 +27,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                         lines.push(Line::from(""));
                         need_paragraph_break = false;
                     }
-                    let mut style = Style::default()
-                        .fg(theme::palette().mauve)
-                        .add_modifier(Modifier::BOLD);
+                    let mut style = theme::HEADER_ACCENT;
                     if level == pulldown_cmark::HeadingLevel::H1 {
                         style = style.add_modifier(Modifier::UNDERLINED);
                     }
@@ -84,28 +82,23 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                         }
                         _ => format!("{indent}- "),
                     };
-                    prefix_spans = vec![Span::styled(
-                        marker,
-                        Style::default().fg(theme::palette().blue),
-                    )];
+                    prefix_spans = vec![Span::styled(marker, theme::LIST_MARKER)];
                 }
                 Tag::BlockQuote(_) => {
                     flush_line(&mut lines, &mut current_spans, &prefix_spans);
                     prefix_spans = vec![Span::styled(
                         "> ".to_string(),
-                        Style::default().fg(theme::palette().green),
+                        Style::default().fg(theme::GREEN),
                     )];
                 }
                 Tag::Link { dest_url, .. } => {
                     let top = current_style(&style_stack, base_style);
                     let link_style = top
-                        .fg(theme::palette().blue)
+                        .fg(theme::BLUE)
                         .add_modifier(Modifier::UNDERLINED);
                     style_stack.push(link_style);
-                    // Store URL for appending after link text
                     style_stack.push(Style::default()); // sentinel
-                                                        // We'll handle the URL in End
-                    let _ = dest_url; // used in TagEnd
+                    let _ = dest_url;
                 }
                 _ => {}
             },
@@ -150,16 +143,14 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
             },
             Event::Text(text) => {
                 if in_code_block {
-                    let code_style = Style::default().fg(theme::palette().teal);
                     for line_str in text.split('\n') {
                         if !current_spans.is_empty() {
                             flush_line(&mut lines, &mut current_spans, &prefix_spans);
                         }
-                        current_spans.push(Span::styled(format!("  {line_str}"), code_style));
+                        current_spans.push(Span::styled(format!("  {line_str}"), theme::CODE));
                     }
                 } else {
                     let style = current_style(&style_stack, base_style);
-                    // Handle text with newlines for soft breaks in headings etc.
                     let parts: Vec<&str> = text.split('\n').collect();
                     for (i, part) in parts.iter().enumerate() {
                         if i > 0 {
@@ -172,8 +163,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 }
             }
             Event::Code(code) => {
-                let style = Style::default().fg(theme::palette().teal);
-                current_spans.push(Span::styled(format!("`{code}`"), style));
+                current_spans.push(Span::styled(format!("`{code}`"), theme::CODE));
             }
             Event::SoftBreak => {
                 current_spans.push(Span::raw(" "));
@@ -185,7 +175,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 flush_line(&mut lines, &mut current_spans, &prefix_spans);
                 lines.push(Line::from(Span::styled(
                     "───────────────────────",
-                    Style::default().fg(theme::palette().overlay0),
+                    theme::META,
                 )));
                 need_paragraph_break = true;
             }
