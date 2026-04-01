@@ -239,9 +239,6 @@ fn build_prompt(
         if count >= max_comments {
             break;
         }
-        if comment.deleted {
-            continue;
-        }
         let author = comment.by.as_deref().unwrap_or("[anon]");
         let indent = "  ".repeat(comment.depth);
         let text = hn_html_to_plain(&comment.text);

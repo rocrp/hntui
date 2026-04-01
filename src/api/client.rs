@@ -337,7 +337,7 @@ impl HnClient {
 
         let mut nodes = Vec::with_capacity(items.len());
         for item in items {
-            if item.dead.unwrap_or(false) {
+            if item.dead.unwrap_or(false) || item.deleted.unwrap_or(false) {
                 continue;
             }
             let comment = Comment::from_item(item, depth);

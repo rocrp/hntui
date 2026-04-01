@@ -167,9 +167,9 @@ pub struct WebComment {
 }
 
 impl WebComment {
-    /// Recursively convert into a `CommentNode` tree, filtering out dead comments.
+    /// Recursively convert into a `CommentNode` tree, filtering out dead/deleted comments.
     pub fn into_comment_node(self, depth: usize) -> Option<CommentNode> {
-        if self.dead {
+        if self.dead || self.deleted {
             return None;
         }
 
@@ -185,13 +185,7 @@ impl WebComment {
         let text = self
             .content
             .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| {
-                if self.deleted {
-                    "[deleted]".to_string()
-                } else {
-                    "[no text]".to_string()
-                }
-            });
+            .unwrap_or_else(|| "[no text]".to_string());
 
         Some(CommentNode {
             comment: Comment {
@@ -204,7 +198,6 @@ impl WebComment {
                 collapsed: has_children,
                 children_loaded: true,
                 children_loading: false,
-                deleted: self.deleted,
             },
             children,
         })
@@ -298,23 +291,15 @@ pub struct Comment {
     pub collapsed: bool,
     pub children_loaded: bool,
     pub children_loading: bool,
-    pub deleted: bool,
 }
 
 impl Comment {
     pub fn from_item(item: HnItem, depth: usize) -> Self {
-        let deleted = item.deleted.unwrap_or(false);
         let kids = item.kids.unwrap_or_default();
         let text = item
             .text
             .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| {
-                if deleted {
-                    "[deleted]".to_string()
-                } else {
-                    "[no text]".to_string()
-                }
-            });
+            .unwrap_or_else(|| "[no text]".to_string());
 
         Self {
             id: item.id,
@@ -326,7 +311,6 @@ impl Comment {
             collapsed: !kids.is_empty(),
             children_loaded: kids.is_empty(),
             children_loading: false,
-            deleted,
         }
     }
 }
