@@ -98,15 +98,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 .fg(theme::comment_indent_color(comment.depth))
                 .add_modifier(Modifier::BOLD);
 
-            let mut header_spans = vec![
+            let header_spans = vec![
                 Span::styled(indent.clone(), indent_style),
                 Span::styled(format!("{thread_marker} "), marker_style),
                 Span::styled(by, author_style),
                 Span::styled(format!(" · {age}"), theme::META),
             ];
-            if comment.dead && !comment.deleted {
-                header_spans.push(Span::styled(" [dead]", theme::ERROR));
-            }
 
             let mut lines = Vec::new();
             lines.push(Line::from(header_spans));

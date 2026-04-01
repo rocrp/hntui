@@ -239,7 +239,7 @@ fn build_prompt(
         if count >= max_comments {
             break;
         }
-        if comment.deleted || comment.dead {
+        if comment.deleted {
             continue;
         }
         let author = comment.by.as_deref().unwrap_or("[anon]");

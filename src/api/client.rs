@@ -266,7 +266,7 @@ impl HnClient {
         Ok(web_item
             .comments
             .into_iter()
-            .map(|c| c.into_comment_node(0))
+            .filter_map(|c| c.into_comment_node(0))
             .collect())
     }
 
@@ -337,6 +337,9 @@ impl HnClient {
 
         let mut nodes = Vec::with_capacity(items.len());
         for item in items {
+            if item.dead.unwrap_or(false) {
+                continue;
+            }
             let comment = Comment::from_item(item, depth);
             let node = CommentNode {
                 comment,

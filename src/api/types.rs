@@ -167,13 +167,17 @@ pub struct WebComment {
 }
 
 impl WebComment {
-    /// Recursively convert into a `CommentNode` tree.
-    pub fn into_comment_node(self, depth: usize) -> CommentNode {
+    /// Recursively convert into a `CommentNode` tree, filtering out dead comments.
+    pub fn into_comment_node(self, depth: usize) -> Option<CommentNode> {
+        if self.dead {
+            return None;
+        }
+
         let child_ids: Vec<u64> = self.comments.iter().map(|c| c.id).collect();
         let children: Vec<CommentNode> = self
             .comments
             .into_iter()
-            .map(|c| c.into_comment_node(depth + 1))
+            .filter_map(|c| c.into_comment_node(depth + 1))
             .collect();
 
         let has_children = !children.is_empty();
@@ -184,14 +188,12 @@ impl WebComment {
             .unwrap_or_else(|| {
                 if self.deleted {
                     "[deleted]".to_string()
-                } else if self.dead {
-                    "[dead]".to_string()
                 } else {
                     "[no text]".to_string()
                 }
             });
 
-        CommentNode {
+        Some(CommentNode {
             comment: Comment {
                 id: self.id,
                 by: self.user,
@@ -203,10 +205,9 @@ impl WebComment {
                 children_loaded: true,
                 children_loading: false,
                 deleted: self.deleted,
-                dead: self.dead,
             },
             children,
-        }
+        })
     }
 }
 
@@ -298,13 +299,11 @@ pub struct Comment {
     pub children_loaded: bool,
     pub children_loading: bool,
     pub deleted: bool,
-    pub dead: bool,
 }
 
 impl Comment {
     pub fn from_item(item: HnItem, depth: usize) -> Self {
         let deleted = item.deleted.unwrap_or(false);
-        let dead = item.dead.unwrap_or(false);
         let kids = item.kids.unwrap_or_default();
         let text = item
             .text
@@ -312,8 +311,6 @@ impl Comment {
             .unwrap_or_else(|| {
                 if deleted {
                     "[deleted]".to_string()
-                } else if dead {
-                    "[dead]".to_string()
                 } else {
                     "[no text]".to_string()
                 }
@@ -330,7 +327,6 @@ impl Comment {
             children_loaded: kids.is_empty(),
             children_loading: false,
             deleted,
-            dead,
         }
     }
 }
