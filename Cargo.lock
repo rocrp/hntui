@@ -640,6 +640,7 @@ version = "0.1.7"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64",
  "chrono",
  "clap",
  "crossterm",

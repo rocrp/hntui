@@ -837,23 +837,39 @@ impl App {
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
             (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenPrimaryBrowser) => {
-                if let Err(err) = self.open_selected_story_in_browser() {
-                    self.last_error = Some(format!("{err:#}"));
+                match self.open_selected_story_in_browser() {
+                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
+                        self.copied_flash = Some(Instant::now());
+                    }
+                    Ok(crate::browser::OpenOutcome::Launched) => {}
+                    Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
             (View::Stories, Action::OpenSecondaryBrowser) => {
-                if let Err(err) = self.open_selected_story_comments_in_browser() {
-                    self.last_error = Some(format!("{err:#}"));
+                match self.open_selected_story_comments_in_browser() {
+                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
+                        self.copied_flash = Some(Instant::now());
+                    }
+                    Ok(crate::browser::OpenOutcome::Launched) => {}
+                    Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
             (View::Comments, Action::OpenPrimaryBrowser) => {
-                if let Err(err) = self.open_current_story_comments_in_browser() {
-                    self.last_error = Some(format!("{err:#}"));
+                match self.open_current_story_comments_in_browser() {
+                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
+                        self.copied_flash = Some(Instant::now());
+                    }
+                    Ok(crate::browser::OpenOutcome::Launched) => {}
+                    Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
             (View::Comments, Action::OpenSecondaryBrowser) => {
-                if let Err(err) = self.open_current_story_in_browser() {
-                    self.last_error = Some(format!("{err:#}"));
+                match self.open_current_story_in_browser() {
+                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
+                        self.copied_flash = Some(Instant::now());
+                    }
+                    Ok(crate::browser::OpenOutcome::Launched) => {}
+                    Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
 
@@ -1666,22 +1682,22 @@ impl App {
         self.prefetched_comments_cache.insert(story_id, comments);
     }
 
-    fn open_selected_story_in_browser(&self) -> Result<()> {
+    fn open_selected_story_in_browser(&self) -> Result<crate::browser::OpenOutcome> {
         let story = self.selected_story().context("no selected story")?;
         open_story(story)
     }
 
-    fn open_selected_story_comments_in_browser(&self) -> Result<()> {
+    fn open_selected_story_comments_in_browser(&self) -> Result<crate::browser::OpenOutcome> {
         let story = self.selected_story().context("no selected story")?;
         open_story_comments(story)
     }
 
-    fn open_current_story_in_browser(&self) -> Result<()> {
+    fn open_current_story_in_browser(&self) -> Result<crate::browser::OpenOutcome> {
         let story = self.current_story.as_ref().context("no current story")?;
         open_story(story)
     }
 
-    fn open_current_story_comments_in_browser(&self) -> Result<()> {
+    fn open_current_story_comments_in_browser(&self) -> Result<crate::browser::OpenOutcome> {
         let story = self.current_story.as_ref().context("no current story")?;
         open_story_comments(story)
     }
@@ -2167,19 +2183,17 @@ fn prefetch_priority(story: &Story, distance: usize, half_viewport: usize) -> u3
     (proximity * 1000.0 + heat * 10.0) as u32
 }
 
-fn open_story(story: &Story) -> Result<()> {
+fn open_story(story: &Story) -> Result<crate::browser::OpenOutcome> {
     let url = story
         .url
         .clone()
         .unwrap_or_else(|| format!("https://news.ycombinator.com/item?id={}", story.id));
-    open::that(url).context("open in browser")?;
-    Ok(())
+    crate::browser::open_url(&url)
 }
 
-fn open_story_comments(story: &Story) -> Result<()> {
+fn open_story_comments(story: &Story) -> Result<crate::browser::OpenOutcome> {
     let url = format!("https://news.ycombinator.com/item?id={}", story.id);
-    open::that(url).context("open comments in browser")?;
-    Ok(())
+    crate::browser::open_url(&url)
 }
 
 fn set_collapse_in_tree(tree: &mut [CommentNode], target: u64, collapsed: bool) -> Option<()> {

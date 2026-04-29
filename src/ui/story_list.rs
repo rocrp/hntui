@@ -179,7 +179,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let footer_inner = footer_block.inner(footer_area);
     frame.render_widget(footer_block, footer_area);
 
-    let meta = if app.filter_input_active {
+    let show_copied = app.copied_flash.is_some_and(|t| t.elapsed().as_secs() < 2);
+    let meta = if show_copied {
+        Line::from(Span::styled("Copied!", theme::SUCCESS))
+    } else if app.filter_input_active {
         let cursor = format!("Filter: {}│", app.keyword_filter);
         Line::from(vec![
             Span::styled(cursor, theme::KEY),
