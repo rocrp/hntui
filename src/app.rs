@@ -128,7 +128,13 @@ impl SettingsPopup {
     }
 
     pub fn field_labels(&self) -> [&str; Self::FIELD_COUNT] {
-        ["API URL", "Model", "API Key", "Max Comments", "System Prompt"]
+        [
+            "API URL",
+            "Model",
+            "API Key",
+            "Max Comments",
+            "System Prompt",
+        ]
     }
 
     pub fn field_values(&self) -> [&str; Self::FIELD_COUNT] {
@@ -224,7 +230,8 @@ impl SettingsPopup {
         if target == self.edit_cursor {
             return;
         }
-        let byte_start = self.edit_buffer
+        let byte_start = self
+            .edit_buffer
             .char_indices()
             .nth(target)
             .map(|(i, _)| i)
@@ -337,8 +344,7 @@ impl App {
         comment_list_state.select(Some(0));
 
         let summarize_config = plugin_config.and_then(|c| c.summarize);
-        let summarize_plugin =
-            SummarizePlugin::new(summarize_config, reqwest::Client::new());
+        let summarize_plugin = SummarizePlugin::new(summarize_config, reqwest::Client::new());
 
         Self {
             view: View::Stories,
@@ -644,7 +650,10 @@ impl App {
             if self.comment_prefetch_in_flight.len() >= MAX_COMMENT_PREFETCH_IN_FLIGHT {
                 break;
             }
-            if self.comment_prefetch_in_flight.contains_key(&candidate.story.id) {
+            if self
+                .comment_prefetch_in_flight
+                .contains_key(&candidate.story.id)
+            {
                 continue;
             }
             // Skip candidates that aren't closer than the furthest cached story —
@@ -786,11 +795,19 @@ impl App {
                 Action::MoveDown => self.summarize_plugin.scroll_down(1),
                 Action::MoveUp => self.summarize_plugin.scroll_up(1),
                 Action::PageDown => {
-                    let amount = self.summarize_plugin.content_height.saturating_sub(2).max(1);
+                    let amount = self
+                        .summarize_plugin
+                        .content_height
+                        .saturating_sub(2)
+                        .max(1);
                     self.summarize_plugin.scroll_down(amount);
                 }
                 Action::PageUp => {
-                    let amount = self.summarize_plugin.content_height.saturating_sub(2).max(1);
+                    let amount = self
+                        .summarize_plugin
+                        .content_height
+                        .saturating_sub(2)
+                        .max(1);
                     self.summarize_plugin.scroll_up(amount);
                 }
                 // 'c' key -> copy summary to clipboard
@@ -876,31 +893,19 @@ impl App {
             (View::Stories, Action::MoveDown) => {
                 let count = self.visible_story_count();
                 move_selection_down(&mut self.story_list_state, count);
-                ensure_visible(
-                    &mut self.story_list_state,
-                    count,
-                    self.story_page_size,
-                );
+                ensure_visible(&mut self.story_list_state, count, self.story_page_size);
                 self.maybe_prefetch_stories();
                 self.maybe_prefetch_comments();
             }
             (View::Stories, Action::MoveUp) => {
                 move_selection_up(&mut self.story_list_state);
                 let count = self.visible_story_count();
-                ensure_visible(
-                    &mut self.story_list_state,
-                    count,
-                    self.story_page_size,
-                );
+                ensure_visible(&mut self.story_list_state, count, self.story_page_size);
                 self.maybe_prefetch_comments();
             }
             (View::Stories, Action::PageDown) => {
                 let count = self.visible_story_count();
-                page_down(
-                    &mut self.story_list_state,
-                    count,
-                    self.story_page_size,
-                );
+                page_down(&mut self.story_list_state, count, self.story_page_size);
                 self.maybe_prefetch_stories();
                 self.maybe_prefetch_comments();
             }
@@ -917,11 +922,7 @@ impl App {
                 let count = self.visible_story_count();
                 if count > 0 {
                     self.story_list_state.select(Some(count - 1));
-                    ensure_visible(
-                        &mut self.story_list_state,
-                        count,
-                        self.story_page_size,
-                    );
+                    ensure_visible(&mut self.story_list_state, count, self.story_page_size);
                     self.maybe_prefetch_stories();
                     self.maybe_prefetch_comments();
                 }
@@ -1051,9 +1052,7 @@ impl App {
                     self.recompute_visible_stories();
                 }
                 KeyCode::Char(c) => {
-                    if key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT
-                    {
+                    if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT {
                         self.keyword_filter.push(c);
                         self.recompute_visible_stories();
                     }
@@ -1071,9 +1070,7 @@ impl App {
                     self.search_query.pop();
                 }
                 KeyCode::Char(c) => {
-                    if key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT
-                    {
+                    if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT {
                         self.search_query.push(c);
                     }
                 }
@@ -1098,7 +1095,9 @@ impl App {
         if self.help_visible {
             if matches!(
                 mouse.kind,
-                MouseEventKind::Down(MouseButton::Left) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+                MouseEventKind::Down(MouseButton::Left)
+                    | MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollUp
             ) {
                 self.help_visible = false;
             }
@@ -1132,8 +1131,7 @@ impl App {
                 let desired_width = frame_area.width.min(60);
                 let line_count = SettingsPopup::FIELD_COUNT + 5; // header + blank + fields + blank + hints
                 let desired_height = (line_count as u16).saturating_add(2).min(frame_area.height);
-                let popup_rect =
-                    crate::ui::centered(frame_area, desired_width, desired_height);
+                let popup_rect = crate::ui::centered(frame_area, desired_width, desired_height);
                 if !rect_contains(popup_rect, col, row) {
                     self.save_settings();
                     self.settings_popup = None;
@@ -1230,11 +1228,7 @@ impl App {
                 self.open_comments_for_selected_story();
             } else {
                 self.story_list_state.select(Some(click_idx));
-                ensure_visible(
-                    &mut self.story_list_state,
-                    count,
-                    self.story_page_size,
-                );
+                ensure_visible(&mut self.story_list_state, count, self.story_page_size);
                 self.maybe_prefetch_comments();
             }
             return;
@@ -1335,11 +1329,7 @@ impl App {
 
                 self.recompute_visible_stories();
                 let count = self.visible_story_count();
-                ensure_visible(
-                    &mut self.story_list_state,
-                    count,
-                    self.story_page_size,
-                );
+                ensure_visible(&mut self.story_list_state, count, self.story_page_size);
                 self.save_story_list_state_background();
                 self.maybe_prefetch_comments();
             }
@@ -1538,7 +1528,10 @@ impl App {
                 .enumerate()
                 .filter(|(_, s)| match &re {
                     Ok(re) => re.is_match(&s.title),
-                    Err(_) => s.title.to_lowercase().contains(&self.keyword_filter.to_lowercase()),
+                    Err(_) => s
+                        .title
+                        .to_lowercase()
+                        .contains(&self.keyword_filter.to_lowercase()),
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -1658,17 +1651,13 @@ impl App {
         while self.prefetched_comments_cache.len() >= PREFETCH_CACHE_CAP {
             let selected = self.story_list_state.selected().unwrap_or(0);
             // Find the cached story furthest from current selection (or no longer in story list)
-            let evict_id = self
-                .prefetch_cache_order
-                .iter()
-                .copied()
-                .max_by_key(|id| {
-                    self.stories
-                        .iter()
-                        .position(|s| s.id == *id)
-                        .map(|pos| pos.abs_diff(selected))
-                        .unwrap_or(usize::MAX) // not in list → evict first
-                });
+            let evict_id = self.prefetch_cache_order.iter().copied().max_by_key(|id| {
+                self.stories
+                    .iter()
+                    .position(|s| s.id == *id)
+                    .map(|pos| pos.abs_diff(selected))
+                    .unwrap_or(usize::MAX) // not in list → evict first
+            });
             if let Some(evict_id) = evict_id {
                 self.prefetched_comments_cache.remove(&evict_id);
                 self.prefetch_cache_order.retain(|id| *id != evict_id);
@@ -2037,8 +2026,7 @@ impl App {
                     if popup.edit_cursor > 0 {
                         let byte = popup.cursor_byte_offset();
                         // Find start of previous char
-                        let prev_byte = popup
-                            .edit_buffer[..byte]
+                        let prev_byte = popup.edit_buffer[..byte]
                             .char_indices()
                             .next_back()
                             .map(|(i, _)| i)
@@ -2176,9 +2164,7 @@ fn prefetch_priority(story: &Story, distance: usize, half_viewport: usize) -> u3
         0.0
     };
 
-    let heat = ((story.score.max(1) as f64).ln()
-        + (story.comment_count.max(1) as f64).ln())
-        / 2.0;
+    let heat = ((story.score.max(1) as f64).ln() + (story.comment_count.max(1) as f64).ln()) / 2.0;
 
     (proximity * 1000.0 + heat * 10.0) as u32
 }
@@ -2353,10 +2339,7 @@ fn comment_heights_ready(len: usize, item_heights: &[usize], viewport_height: us
 }
 
 fn comment_total_lines(item_heights: &[usize]) -> usize {
-    item_heights
-        .iter()
-        .map(|height| (*height).max(1))
-        .sum()
+    item_heights.iter().map(|height| (*height).max(1)).sum()
 }
 
 fn comment_line_range(item_heights: &[usize], index: usize) -> (usize, usize) {
@@ -2415,11 +2398,7 @@ fn ensure_comment_line_offset(
     *line_offset = offset.min(max_offset);
 }
 
-fn page_down_with_heights(
-    state: &mut ListState,
-    item_heights: &[usize],
-    viewport_height: usize,
-) {
+fn page_down_with_heights(state: &mut ListState, item_heights: &[usize], viewport_height: usize) {
     let len = item_heights.len();
     if len == 0 {
         state.select(None);
@@ -2449,11 +2428,7 @@ fn page_down_with_heights(
     state.select(Some(target));
 }
 
-fn page_up_with_heights(
-    state: &mut ListState,
-    item_heights: &[usize],
-    viewport_height: usize,
-) {
+fn page_up_with_heights(state: &mut ListState, item_heights: &[usize], viewport_height: usize) {
     let len = item_heights.len();
     if len == 0 {
         state.select(None);
@@ -2528,10 +2503,7 @@ fn page_up_comment_list(
 }
 
 fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
-    col >= rect.x
-        && col < rect.x + rect.width
-        && row >= rect.y
-        && row < rect.y + rect.height
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
 pub async fn run(
@@ -2633,7 +2605,11 @@ pub async fn run(
     if let Some(store) = &state_store {
         if !app.story_ids.is_empty() && !app.stories.is_empty() {
             store
-                .save_story_list_state(app.story_ids.clone(), app.stories.clone(), app.current_feed.as_str().to_string())
+                .save_story_list_state(
+                    app.story_ids.clone(),
+                    app.stories.clone(),
+                    app.current_feed.as_str().to_string(),
+                )
                 .await?;
         }
     }
