@@ -99,24 +99,124 @@ pub(crate) fn domain_from_url(url: &str) -> Option<String> {
 /// Map a normalized domain (as returned by `domain_from_url`, or the literal
 /// `"self"` for self-posts) to a Nerd Font glyph. Falls back to a globe.
 pub(crate) fn domain_icon(domain: &str) -> &'static str {
+    const NEWS: &str = "\u{f1ea}";
+    const ACADEMIC: &str = "\u{f02d}";
+    const AI: &str = "\u{f544}";
+    const GITHUB: &str = "\u{f09b}";
+    const GOOGLE: &str = "\u{f1a0}";
+    const APPLE: &str = "\u{f179}";
+    const WINDOWS: &str = "\u{f17a}";
+    const AMAZON: &str = "\u{f270}";
+    const STACKOVERFLOW: &str = "\u{f16c}";
+    const TWITTER: &str = "\u{f099}";
+
     match domain {
         "self" => "\u{f075}",
-        "github.com" => "\u{f09b}",
+
+        // Code hosting
+        "github.com" | "github.blog" | "gist.github.com" => GITHUB,
         "gitlab.com" => "\u{f296}",
         "bitbucket.org" => "\u{f171}",
         "codeberg.org" => "\u{f1d3}",
+
+        // Video
         "youtube.com" | "youtu.be" => "\u{f167}",
-        "twitter.com" | "x.com" => "\u{f099}",
-        "news.ycombinator.com" => "\u{f1d4}",
+        "twitch.tv" => "\u{f1e8}",
+
+        // Social
+        "twitter.com" | "x.com" | "bsky.app" => TWITTER,
+
+        // Y Combinator / HN
+        "news.ycombinator.com" | "ycombinator.com" => "\u{f1d4}",
+
+        // Blog platforms
         "medium.com" => "\u{f23a}",
-        "stackoverflow.com" => "\u{f16c}",
-        "arxiv.org" => "\u{f02d}",
-        "nytimes.com" | "bloomberg.com" | "wsj.com" | "theverge.com" | "arstechnica.com"
-        | "bbc.com" | "bbc.co.uk" => "\u{f1ea}",
+
+        // Q&A
+        "stackoverflow.com" => STACKOVERFLOW,
+
+        // Big tech
+        "googleblog.com" | "ai.google" | "research.google" | "blog.google" => GOOGLE,
+        "aws.amazon.com" | "amazon.com" | "amazon.science" => AMAZON,
+
+        // AI labs
+        "anthropic.com" | "claude.ai" | "openai.com" | "chatgpt.com" | "huggingface.co"
+        | "mistral.ai" | "cohere.com" | "cohere.ai" | "deepmind.com" | "deepmind.google" => AI,
+
+        // News
+        "nytimes.com"
+        | "bloomberg.com"
+        | "wsj.com"
+        | "ft.com"
+        | "theguardian.com"
+        | "reuters.com"
+        | "washingtonpost.com"
+        | "economist.com"
+        | "theatlantic.com"
+        | "apnews.com"
+        | "ap.org"
+        | "npr.org"
+        | "axios.com"
+        | "politico.com"
+        | "cnn.com"
+        | "vox.com"
+        | "propublica.org"
+        | "theintercept.com"
+        | "restofworld.org"
+        | "qz.com"
+        | "heise.de"
+        | "scmp.com"
+        | "nymag.com"
+        | "newsweek.com"
+        | "wired.com"
+        | "vice.com"
+        | "technologyreview.com"
+        | "theregister.com"
+        | "theverge.com"
+        | "arstechnica.com"
+        | "cnbc.com"
+        | "engadget.com"
+        | "techcrunch.com"
+        | "gizmodo.com"
+        | "bbc.com"
+        | "bbc.co.uk"
+        | "quantamagazine.org"
+        | "atlasobscura.com"
+        | "phys.org"
+        | "apod.nasa.gov"
+        | "nasa.gov" => NEWS,
+
+        // Academic / research
+        "arxiv.org"
+        | "dl.acm.org"
+        | "ieee.org"
+        | "nature.com"
+        | "science.org"
+        | "sciencemag.org"
+        | "biorxiv.org"
+        | "medrxiv.org"
+        | "pubmed.ncbi.nlm.nih.gov"
+        | "scholar.google.com"
+        | "zenodo.org"
+        | "osf.io"
+        | "ssrn.com"
+        | "plos.org"
+        | "pnas.org"
+        | "elifesciences.org"
+        | "link.springer.com"
+        | "sciencedirect.com"
+        | "cell.com" => ACADEMIC,
+
+        // Suffix matches (must come after exact matches that would otherwise
+        // be subsumed, e.g. scholar.google.com).
+        d if d.ends_with(".github.io") => GITHUB,
         d if d == "reddit.com" || d.ends_with(".reddit.com") => "\u{f281}",
         d if d == "wikipedia.org" || d.ends_with(".wikipedia.org") => "\u{f266}",
-        d if d == "stackexchange.com" || d.ends_with(".stackexchange.com") => "\u{f16c}",
+        d if d == "stackexchange.com" || d.ends_with(".stackexchange.com") => STACKOVERFLOW,
         d if d == "substack.com" || d.ends_with(".substack.com") => "\u{f09e}",
+        d if d == "apple.com" || d.ends_with(".apple.com") => APPLE,
+        d if d == "microsoft.com" || d.ends_with(".microsoft.com") => WINDOWS,
+
         _ => "\u{f0ac}",
     }
 }
@@ -185,5 +285,40 @@ mod tests {
     #[test]
     fn domain_icon_unknown_falls_back_to_globe() {
         assert_eq!(domain_icon("some-random-blog.example"), "\u{f0ac}");
+    }
+
+    #[test]
+    fn domain_icon_github_family() {
+        assert_eq!(domain_icon("github.blog"), "\u{f09b}");
+        assert_eq!(domain_icon("gist.github.com"), "\u{f09b}");
+        assert_eq!(domain_icon("user.github.io"), "\u{f09b}");
+    }
+
+    #[test]
+    fn domain_icon_news_bucket() {
+        assert_eq!(domain_icon("theguardian.com"), "\u{f1ea}");
+        assert_eq!(domain_icon("ft.com"), "\u{f1ea}");
+        assert_eq!(domain_icon("technologyreview.com"), "\u{f1ea}");
+    }
+
+    #[test]
+    fn domain_icon_academic_bucket() {
+        assert_eq!(domain_icon("dl.acm.org"), "\u{f02d}");
+        assert_eq!(domain_icon("nature.com"), "\u{f02d}");
+        assert_eq!(domain_icon("scholar.google.com"), "\u{f02d}");
+    }
+
+    #[test]
+    fn domain_icon_ai_labs() {
+        assert_eq!(domain_icon("anthropic.com"), "\u{f544}");
+        assert_eq!(domain_icon("huggingface.co"), "\u{f544}");
+    }
+
+    #[test]
+    fn domain_icon_big_tech_suffix() {
+        assert_eq!(domain_icon("apple.com"), "\u{f179}");
+        assert_eq!(domain_icon("developer.apple.com"), "\u{f179}");
+        assert_eq!(domain_icon("microsoft.com"), "\u{f17a}");
+        assert_eq!(domain_icon("devblogs.microsoft.com"), "\u{f17a}");
     }
 }
