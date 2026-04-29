@@ -10,6 +10,10 @@ pub(crate) struct StateStore {
     path: PathBuf,
 }
 
+/// Cap on persisted seen story IDs. HN IDs are monotonic, so we keep the
+/// highest N — older items naturally fall off as the user reads more.
+pub(crate) const SEEN_STORY_CAPACITY: usize = 10_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoryListState {
     pub saved_at: i64,
@@ -17,6 +21,8 @@ pub(crate) struct StoryListState {
     pub stories: Vec<Story>,
     #[serde(default)]
     pub feed: Option<String>,
+    #[serde(default)]
+    pub seen_story_ids: Vec<u64>,
 }
 
 impl StateStore {
@@ -43,6 +49,7 @@ impl StateStore {
         story_ids: Vec<u64>,
         stories: Vec<Story>,
         feed: String,
+        mut seen_story_ids: Vec<u64>,
     ) -> Result<()> {
         anyhow::ensure!(
             !story_ids.is_empty(),
@@ -50,11 +57,20 @@ impl StateStore {
         );
         anyhow::ensure!(!stories.is_empty(), "refusing to save empty stories state");
 
+        // Prune the seen list: dedupe, then keep only the highest N IDs.
+        seen_story_ids.sort_unstable();
+        seen_story_ids.dedup();
+        if seen_story_ids.len() > SEEN_STORY_CAPACITY {
+            let drop = seen_story_ids.len() - SEEN_STORY_CAPACITY;
+            seen_story_ids.drain(0..drop);
+        }
+
         let state = StoryListState {
             saved_at: now_unix()?,
             story_ids,
             stories,
             feed: Some(feed),
+            seen_story_ids,
         };
         let bytes = serde_json::to_vec(&state).context("encode story list state")?;
         atomic_write(&self.path, &bytes).await?;

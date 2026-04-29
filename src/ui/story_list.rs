@@ -1,6 +1,8 @@
 use crate::app::{App, LayoutAreas};
 use crate::ui::theme;
-use crate::ui::{domain_from_url, domain_icon, format_age, format_error, now_unix};
+use crate::ui::{
+    domain_from_url, domain_icon, format_age, format_error, now_unix, FALLBACK_DOMAIN_ICON,
+};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -113,12 +115,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         story_data
             .into_iter()
             .map(
-                |(idx, story_idx, _id, title, url, score, comment_count, time, prefetching)| {
+                |(idx, story_idx, id, title, url, score, comment_count, time, prefetching)| {
                     let domain = url
                         .as_deref()
                         .and_then(domain_from_url)
                         .unwrap_or_else(|| "self".to_string());
-                    let icon = domain_icon(&domain);
+                    let known_icon = domain_icon(&domain);
+                    let icon = known_icon.unwrap_or(FALLBACK_DOMAIN_ICON);
                     let title = decode_html_entities(&title).into_owned();
 
                     let score_level = theme::score_level(score);
@@ -129,8 +132,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     let distance = idx.abs_diff(selected);
                     let fg = theme::story_gradient_fg(idx, importance, distance, half_viewport);
 
+                    let seen = app.is_story_seen(id);
                     let mut base_style = Style::default().fg(fg);
-                    if importance >= 0.9 {
+                    if seen {
+                        base_style = base_style.add_modifier(Modifier::DIM);
+                    } else if importance >= 0.9 {
                         base_style = base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                     } else if importance >= 0.75 {
                         base_style = base_style.add_modifier(Modifier::BOLD);
@@ -141,15 +147,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         Span::styled(format!("{:>2}. ", display_num), base_style),
                         Span::styled(format!("{icon} "), base_style),
                         Span::styled(title, base_style),
-                        Span::styled(
+                    ];
+                    if known_icon.is_none() {
+                        spans.push(Span::styled(
                             format!(" ({domain})"),
                             base_style.add_modifier(Modifier::ITALIC),
-                        ),
+                        ));
+                    }
+                    spans.extend([
                         Span::raw("  "),
                         Span::styled(format!("{}", score), base_style),
                         Span::styled("·", base_style),
                         Span::styled(format!("{}", comment_count), base_style),
-                    ];
+                    ]);
 
                     if app.search_active {
                         spans.push(Span::styled(

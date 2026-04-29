@@ -96,9 +96,14 @@ pub(crate) fn domain_from_url(url: &str) -> Option<String> {
     Some(host_port.trim_start_matches("www.").to_string())
 }
 
+/// Glyph used when the domain is not in the whitelist.
+pub(crate) const FALLBACK_DOMAIN_ICON: &str = "\u{f0ac}";
+
 /// Map a normalized domain (as returned by `domain_from_url`, or the literal
-/// `"self"` for self-posts) to a Nerd Font glyph. Falls back to a globe.
-pub(crate) fn domain_icon(domain: &str) -> &'static str {
+/// `"self"` for self-posts) to a Nerd Font glyph. Returns `None` if the
+/// domain is not in the whitelist; callers can then render
+/// `FALLBACK_DOMAIN_ICON` and keep the literal domain text alongside it.
+pub(crate) fn domain_icon(domain: &str) -> Option<&'static str> {
     const NEWS: &str = "\u{f1ea}";
     const ACADEMIC: &str = "\u{f02d}";
     const AI: &str = "\u{f544}";
@@ -110,7 +115,7 @@ pub(crate) fn domain_icon(domain: &str) -> &'static str {
     const STACKOVERFLOW: &str = "\u{f16c}";
     const TWITTER: &str = "\u{f099}";
 
-    match domain {
+    let glyph = match domain {
         "self" => "\u{f075}",
 
         // Code hosting
@@ -217,8 +222,9 @@ pub(crate) fn domain_icon(domain: &str) -> &'static str {
         d if d == "apple.com" || d.ends_with(".apple.com") => APPLE,
         d if d == "microsoft.com" || d.ends_with(".microsoft.com") => WINDOWS,
 
-        _ => "\u{f0ac}",
-    }
+        _ => return None,
+    };
+    Some(glyph)
 }
 
 pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -263,62 +269,62 @@ mod tests {
 
     #[test]
     fn domain_icon_known_host() {
-        assert_eq!(domain_icon("github.com"), "\u{f09b}");
+        assert_eq!(domain_icon("github.com"), Some("\u{f09b}"));
     }
 
     #[test]
     fn domain_icon_suffix_match_reddit() {
-        assert_eq!(domain_icon("old.reddit.com"), "\u{f281}");
-        assert_eq!(domain_icon("reddit.com"), "\u{f281}");
+        assert_eq!(domain_icon("old.reddit.com"), Some("\u{f281}"));
+        assert_eq!(domain_icon("reddit.com"), Some("\u{f281}"));
     }
 
     #[test]
     fn domain_icon_suffix_match_wikipedia() {
-        assert_eq!(domain_icon("en.wikipedia.org"), "\u{f266}");
+        assert_eq!(domain_icon("en.wikipedia.org"), Some("\u{f266}"));
     }
 
     #[test]
     fn domain_icon_self_post() {
-        assert_eq!(domain_icon("self"), "\u{f075}");
+        assert_eq!(domain_icon("self"), Some("\u{f075}"));
     }
 
     #[test]
-    fn domain_icon_unknown_falls_back_to_globe() {
-        assert_eq!(domain_icon("some-random-blog.example"), "\u{f0ac}");
+    fn domain_icon_unknown_returns_none() {
+        assert_eq!(domain_icon("some-random-blog.example"), None);
     }
 
     #[test]
     fn domain_icon_github_family() {
-        assert_eq!(domain_icon("github.blog"), "\u{f09b}");
-        assert_eq!(domain_icon("gist.github.com"), "\u{f09b}");
-        assert_eq!(domain_icon("user.github.io"), "\u{f09b}");
+        assert_eq!(domain_icon("github.blog"), Some("\u{f09b}"));
+        assert_eq!(domain_icon("gist.github.com"), Some("\u{f09b}"));
+        assert_eq!(domain_icon("user.github.io"), Some("\u{f09b}"));
     }
 
     #[test]
     fn domain_icon_news_bucket() {
-        assert_eq!(domain_icon("theguardian.com"), "\u{f1ea}");
-        assert_eq!(domain_icon("ft.com"), "\u{f1ea}");
-        assert_eq!(domain_icon("technologyreview.com"), "\u{f1ea}");
+        assert_eq!(domain_icon("theguardian.com"), Some("\u{f1ea}"));
+        assert_eq!(domain_icon("ft.com"), Some("\u{f1ea}"));
+        assert_eq!(domain_icon("technologyreview.com"), Some("\u{f1ea}"));
     }
 
     #[test]
     fn domain_icon_academic_bucket() {
-        assert_eq!(domain_icon("dl.acm.org"), "\u{f02d}");
-        assert_eq!(domain_icon("nature.com"), "\u{f02d}");
-        assert_eq!(domain_icon("scholar.google.com"), "\u{f02d}");
+        assert_eq!(domain_icon("dl.acm.org"), Some("\u{f02d}"));
+        assert_eq!(domain_icon("nature.com"), Some("\u{f02d}"));
+        assert_eq!(domain_icon("scholar.google.com"), Some("\u{f02d}"));
     }
 
     #[test]
     fn domain_icon_ai_labs() {
-        assert_eq!(domain_icon("anthropic.com"), "\u{f544}");
-        assert_eq!(domain_icon("huggingface.co"), "\u{f544}");
+        assert_eq!(domain_icon("anthropic.com"), Some("\u{f544}"));
+        assert_eq!(domain_icon("huggingface.co"), Some("\u{f544}"));
     }
 
     #[test]
     fn domain_icon_big_tech_suffix() {
-        assert_eq!(domain_icon("apple.com"), "\u{f179}");
-        assert_eq!(domain_icon("developer.apple.com"), "\u{f179}");
-        assert_eq!(domain_icon("microsoft.com"), "\u{f17a}");
-        assert_eq!(domain_icon("devblogs.microsoft.com"), "\u{f17a}");
+        assert_eq!(domain_icon("apple.com"), Some("\u{f179}"));
+        assert_eq!(domain_icon("developer.apple.com"), Some("\u{f179}"));
+        assert_eq!(domain_icon("microsoft.com"), Some("\u{f17a}"));
+        assert_eq!(domain_icon("devblogs.microsoft.com"), Some("\u{f17a}"));
     }
 }

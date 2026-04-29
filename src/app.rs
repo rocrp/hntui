@@ -15,7 +15,7 @@ use futures::StreamExt;
 use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -326,6 +326,8 @@ pub struct App {
 
     comment_children_generation: u64,
     comment_children_in_flight: HashMap<u64, u64>,
+
+    pub seen_story_ids: HashSet<u64>,
 }
 
 impl App {
@@ -407,6 +409,8 @@ impl App {
 
             comment_children_generation: 0,
             comment_children_in_flight: HashMap::new(),
+
+            seen_story_ids: HashSet::new(),
         }
     }
 
@@ -472,11 +476,25 @@ impl App {
         let story_ids = self.story_ids.clone();
         let stories = self.stories.clone();
         let feed = self.current_feed.as_str().to_string();
+        let seen_story_ids: Vec<u64> = self.seen_story_ids.iter().copied().collect();
         tokio::spawn(async move {
-            if let Err(err) = store.save_story_list_state(story_ids, stories, feed).await {
+            if let Err(err) = store
+                .save_story_list_state(story_ids, stories, feed, seen_story_ids)
+                .await
+            {
                 logging::log_error(format!("failed to save story list state: {err:#}"));
             }
         });
+    }
+
+    pub fn is_story_seen(&self, id: u64) -> bool {
+        self.seen_story_ids.contains(&id)
+    }
+
+    pub fn mark_story_seen(&mut self, id: u64) {
+        if self.seen_story_ids.insert(id) {
+            self.save_story_list_state_background();
+        }
     }
 
     pub fn should_quit(&self) -> bool {
@@ -677,6 +695,7 @@ impl App {
         let Some(story) = self.selected_story().cloned() else {
             return;
         };
+        self.mark_story_seen(story.id);
 
         if self
             .current_story
@@ -854,20 +873,30 @@ impl App {
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
             (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenPrimaryBrowser) => {
+                let seen_id = self.selected_story().map(|s| s.id);
                 match self.open_selected_story_in_browser() {
-                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
-                        self.copied_flash = Some(Instant::now());
+                    Ok(outcome) => {
+                        if let crate::browser::OpenOutcome::CopiedToClipboard = outcome {
+                            self.copied_flash = Some(Instant::now());
+                        }
+                        if let Some(id) = seen_id {
+                            self.mark_story_seen(id);
+                        }
                     }
-                    Ok(crate::browser::OpenOutcome::Launched) => {}
                     Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
             (View::Stories, Action::OpenSecondaryBrowser) => {
+                let seen_id = self.selected_story().map(|s| s.id);
                 match self.open_selected_story_comments_in_browser() {
-                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
-                        self.copied_flash = Some(Instant::now());
+                    Ok(outcome) => {
+                        if let crate::browser::OpenOutcome::CopiedToClipboard = outcome {
+                            self.copied_flash = Some(Instant::now());
+                        }
+                        if let Some(id) = seen_id {
+                            self.mark_story_seen(id);
+                        }
                     }
-                    Ok(crate::browser::OpenOutcome::Launched) => {}
                     Err(err) => self.last_error = Some(format!("{err:#}")),
                 }
             }
@@ -2553,6 +2582,7 @@ pub async fn run(
     if let Some(store) = &state_store {
         if let Some(state) = store.load_story_list_state().await? {
             let feed = state.feed.as_deref().and_then(FeedKind::from_str_opt);
+            app.seen_story_ids.extend(state.seen_story_ids);
             app.restore_story_list_state(state.story_ids, state.stories, feed);
         }
     }
@@ -2609,6 +2639,7 @@ pub async fn run(
                     app.story_ids.clone(),
                     app.stories.clone(),
                     app.current_feed.as_str().to_string(),
+                    app.seen_story_ids.iter().copied().collect(),
                 )
                 .await?;
         }
