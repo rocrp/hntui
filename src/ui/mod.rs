@@ -96,6 +96,31 @@ pub(crate) fn domain_from_url(url: &str) -> Option<String> {
     Some(host_port.trim_start_matches("www.").to_string())
 }
 
+/// Map a normalized domain (as returned by `domain_from_url`, or the literal
+/// `"self"` for self-posts) to a Nerd Font glyph. Falls back to a globe.
+pub(crate) fn domain_icon(domain: &str) -> &'static str {
+    match domain {
+        "self" => "\u{f075}",
+        "github.com" => "\u{f09b}",
+        "gitlab.com" => "\u{f296}",
+        "bitbucket.org" => "\u{f171}",
+        "codeberg.org" => "\u{f1d3}",
+        "youtube.com" | "youtu.be" => "\u{f167}",
+        "twitter.com" | "x.com" => "\u{f099}",
+        "news.ycombinator.com" => "\u{f1d4}",
+        "medium.com" => "\u{f23a}",
+        "stackoverflow.com" => "\u{f16c}",
+        "arxiv.org" => "\u{f02d}",
+        "nytimes.com" | "bloomberg.com" | "wsj.com" | "theverge.com" | "arstechnica.com"
+        | "bbc.com" | "bbc.co.uk" => "\u{f1ea}",
+        d if d == "reddit.com" || d.ends_with(".reddit.com") => "\u{f281}",
+        d if d == "wikipedia.org" || d.ends_with(".wikipedia.org") => "\u{f266}",
+        d if d == "stackexchange.com" || d.ends_with(".stackexchange.com") => "\u{f16c}",
+        d if d == "substack.com" || d.ends_with(".substack.com") => "\u{f09e}",
+        _ => "\u{f0ac}",
+    }
+}
+
 pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
@@ -130,4 +155,35 @@ fn error_tip(err: &str) -> Option<&'static str> {
         return Some("--concurrency 8 or --no-file-cache");
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_icon_known_host() {
+        assert_eq!(domain_icon("github.com"), "\u{f09b}");
+    }
+
+    #[test]
+    fn domain_icon_suffix_match_reddit() {
+        assert_eq!(domain_icon("old.reddit.com"), "\u{f281}");
+        assert_eq!(domain_icon("reddit.com"), "\u{f281}");
+    }
+
+    #[test]
+    fn domain_icon_suffix_match_wikipedia() {
+        assert_eq!(domain_icon("en.wikipedia.org"), "\u{f266}");
+    }
+
+    #[test]
+    fn domain_icon_self_post() {
+        assert_eq!(domain_icon("self"), "\u{f075}");
+    }
+
+    #[test]
+    fn domain_icon_unknown_falls_back_to_globe() {
+        assert_eq!(domain_icon("some-random-blog.example"), "\u{f0ac}");
+    }
 }

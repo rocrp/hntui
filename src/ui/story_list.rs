@@ -1,6 +1,6 @@
 use crate::app::{App, LayoutAreas};
 use crate::ui::theme;
-use crate::ui::{domain_from_url, format_age, format_error, now_unix};
+use crate::ui::{domain_from_url, domain_icon, format_age, format_error, now_unix};
 use html_escape::decode_html_entities;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -118,6 +118,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         .as_deref()
                         .and_then(domain_from_url)
                         .unwrap_or_else(|| "self".to_string());
+                    let icon = domain_icon(&domain);
                     let title = decode_html_entities(&title).into_owned();
 
                     let score_level = theme::score_level(score);
@@ -138,6 +139,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     let display_num = story_idx + 1;
                     let mut spans = vec![
                         Span::styled(format!("{:>2}. ", display_num), base_style),
+                        Span::styled(format!("{icon} "), base_style),
                         Span::styled(title, base_style),
                         Span::styled(
                             format!(" ({domain})"),
@@ -170,9 +172,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .collect::<Vec<_>>()
     };
 
-    let list = List::new(items).highlight_symbol("").highlight_style(
-        theme::SELECTED.add_modifier(Modifier::BOLD),
-    );
+    let list = List::new(items)
+        .highlight_symbol("")
+        .highlight_style(theme::SELECTED.add_modifier(Modifier::BOLD));
     frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
 
     let footer_block = Block::default().borders(Borders::TOP);

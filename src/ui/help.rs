@@ -11,7 +11,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     fn section_title(name: &str, active: bool) -> Line<'static> {
-        Line::from(Span::styled(name.to_string(), theme::section_heading(active)))
+        Line::from(Span::styled(
+            name.to_string(),
+            theme::section_heading(active),
+        ))
     }
 
     fn kv(keys: &str, desc: &str) -> Line<'static> {
@@ -24,7 +27,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     let active = app.view;
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled("Shortcuts", theme::HEADER)));
-    lines.push(Line::from(Span::styled("Press ? or Esc to close.", theme::HINT)));
+    lines.push(Line::from(Span::styled(
+        "Press ? or Esc to close.",
+        theme::HINT,
+    )));
     lines.push(Line::raw(""));
 
     let stories_active = active == View::Stories;

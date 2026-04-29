@@ -46,19 +46,49 @@ struct ScaleStep {
 }
 
 const SCORE_SCALE: [ScaleStep; 5] = [
-    ScaleStep { min: 500, color: hex(0x9F633F) },
-    ScaleStep { min: 250, color: hex(0x925B3B) },
-    ScaleStep { min: 100, color: hex(0x855337) },
-    ScaleStep { min: 50,  color: hex(0x5F433A) },
-    ScaleStep { min: 0,   color: hex(0x3F2E2B) },
+    ScaleStep {
+        min: 500,
+        color: hex(0x9F633F),
+    },
+    ScaleStep {
+        min: 250,
+        color: hex(0x925B3B),
+    },
+    ScaleStep {
+        min: 100,
+        color: hex(0x855337),
+    },
+    ScaleStep {
+        min: 50,
+        color: hex(0x5F433A),
+    },
+    ScaleStep {
+        min: 0,
+        color: hex(0x3F2E2B),
+    },
 ];
 
 const COMMENT_SCALE: [ScaleStep; 5] = [
-    ScaleStep { min: 300, color: hex(0x5F76A4) },
-    ScaleStep { min: 200, color: hex(0x586E9A) },
-    ScaleStep { min: 100, color: hex(0x516690) },
-    ScaleStep { min: 50,  color: hex(0x45526E) },
-    ScaleStep { min: 0,   color: hex(0x353E5B) },
+    ScaleStep {
+        min: 300,
+        color: hex(0x5F76A4),
+    },
+    ScaleStep {
+        min: 200,
+        color: hex(0x586E9A),
+    },
+    ScaleStep {
+        min: 100,
+        color: hex(0x516690),
+    },
+    ScaleStep {
+        min: 50,
+        color: hex(0x45526E),
+    },
+    ScaleStep {
+        min: 0,
+        color: hex(0x353E5B),
+    },
 ];
 
 // ── Semantic styles (shared across all views) ────────────────────────
@@ -99,7 +129,11 @@ pub(crate) const LIST_MARKER: Style = Style::new().fg(BLUE);
 pub(crate) const BLOCK_CURSOR: Style = Style::new().fg(SURFACE2).bg(GREEN);
 
 pub(crate) fn section_heading(active: bool) -> Style {
-    if active { ACCENT } else { Style::new().fg(SUBTEXT0).add_modifier(Modifier::BOLD) }
+    if active {
+        ACCENT
+    } else {
+        Style::new().fg(SUBTEXT0).add_modifier(Modifier::BOLD)
+    }
 }
 
 // ── Scale helpers ────────────────────────────────────────────────────

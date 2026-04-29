@@ -80,11 +80,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 '▾'
             };
 
-            let by = comment
-                .by
-                .as_deref()
-                .unwrap_or("[unknown]")
-                .to_string();
+            let by = comment.by.as_deref().unwrap_or("[unknown]").to_string();
             let age = comment
                 .time
                 .map(|t| format_age(t, now))

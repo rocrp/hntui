@@ -93,9 +93,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 }
                 Tag::Link { dest_url, .. } => {
                     let top = current_style(&style_stack, base_style);
-                    let link_style = top
-                        .fg(theme::BLUE)
-                        .add_modifier(Modifier::UNDERLINED);
+                    let link_style = top.fg(theme::BLUE).add_modifier(Modifier::UNDERLINED);
                     style_stack.push(link_style);
                     style_stack.push(Style::default()); // sentinel
                     let _ = dest_url;
