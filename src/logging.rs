@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -90,4 +90,35 @@ fn open_log_file_at(path: &Path) -> Result<File> {
         .append(true)
         .open(path)
         .with_context(|| format!("open log file {}", path.display()))
+}
+
+struct LogAdapter;
+
+impl log::Log for LogAdapter {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let line = format!("[{}] {}", record.target(), record.args());
+        match record.level() {
+            log::Level::Error => log_error(line),
+            _ => log_info(line),
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static LOG_ADAPTER: LogAdapter = LogAdapter;
+
+/// Install the global `log` crate sink so library logs (e.g. smolllm's retry
+/// warnings and metrics) flow through the same file as hntui's own logs.
+pub fn init_log_bridge() {
+    if log::set_logger(&LOG_ADAPTER).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
 }
