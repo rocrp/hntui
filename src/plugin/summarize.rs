@@ -1,7 +1,9 @@
+use crate::app::AppEvent;
 use crate::plugin::config::SummarizeConfig;
-use crate::plugin::llm::{stream_chat_completion, ChatMessage};
 use crate::plugin::{PluginContext, PluginEvent};
 use crate::ui::comment_view::hn_html_to_plain;
+use anyhow::anyhow;
+use futures::StreamExt;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +24,8 @@ pub struct SummarizePlugin {
     pub comment_count: usize,
     /// Set during render: visible content height in rows (for page scroll)
     pub content_height: usize,
+    pub reasoning_buffer: String,
+    content_started: bool,
     /// LLM model name for display in overlay title
     pub model_name: String,
     /// Brief "Copied!" flash timestamp
@@ -46,6 +50,8 @@ impl SummarizePlugin {
             scroll_offset: 0,
             comment_count: 0,
             content_height: 0,
+            reasoning_buffer: String::new(),
+            content_started: false,
             model_name: String::new(),
             copied_flash: None,
             story_title: String::new(),
@@ -80,6 +86,8 @@ impl SummarizePlugin {
         self.error = None;
         self.scroll_offset = 0;
         self.comment_count = 0;
+        self.reasoning_buffer.clear();
+        self.content_started = false;
         self.model_name.clear();
         self.copied_flash = None;
         self.story_title.clear();
@@ -102,20 +110,12 @@ impl SummarizePlugin {
         let Some(config) = &self.config else {
             self.state = SummarizeState::Error;
             self.error = Some(
-                "LLM not configured. Press , for settings or set HNTUI_LLM_API_KEY"
-                    .to_string(),
+                "LLM not configured. Press , for settings or set HNTUI_LLM_API_KEY".to_string(),
             );
             return;
         };
 
-        let Some(api_key) = config.resolve_api_key() else {
-            self.state = SummarizeState::Error;
-            self.error = Some(
-                "API key not set. Press , for settings or set HNTUI_LLM_API_KEY env var"
-                    .to_string(),
-            );
-            return;
-        };
+        let api_key = config.resolve_api_key();
 
         let Some(story) = ctx.current_story else {
             self.state = SummarizeState::Error;
@@ -144,24 +144,14 @@ impl SummarizePlugin {
         self.story_time = story.time;
 
         let prompt = build_prompt(story, ctx.comment_list, config.max_comments);
-        let messages = vec![
-            ChatMessage {
-                role: "system",
-                content: config.system_prompt.clone(),
-            },
-            ChatMessage {
-                role: "user",
-                content: prompt,
-            },
-        ];
-
-        let http = self.http.clone();
-        let api_url = config.api_url.clone();
+        let system_prompt = config.system_prompt.clone();
         let model = config.model.clone();
+        let base_url = config.base_url.clone();
+        let http = self.http.clone();
         let tx = ctx.tx.clone();
 
         tokio::spawn(async move {
-            stream_chat_completion(&http, &api_url, &api_key, &model, messages, tx).await;
+            run_stream(http, model, system_prompt, prompt, api_key, base_url, tx).await;
         });
     }
 
@@ -169,7 +159,10 @@ impl SummarizePlugin {
     fn build_copy_text(&self) -> String {
         let hn_link = format!("https://news.ycombinator.com/item?id={}", self.story_id);
         let mut out = String::from("---\n");
-        out.push_str(&format!("title: \"{}\"\n", self.story_title.replace('"', "\\\"")));
+        out.push_str(&format!(
+            "title: \"{}\"\n",
+            self.story_title.replace('"', "\\\"")
+        ));
         if let Some(url) = &self.story_url {
             out.push_str(&format!("source: {url}\n"));
         }
@@ -211,11 +204,20 @@ impl SummarizePlugin {
 
     pub fn handle_event(&mut self, event: PluginEvent) {
         match event {
-            PluginEvent::SummarizeChunk { delta } => {
-                if self.state == SummarizeState::Loading {
-                    self.state = SummarizeState::Streaming;
+            PluginEvent::SummarizeChunk { content, reasoning } => {
+                if !reasoning.is_empty() && !self.content_started {
+                    self.reasoning_buffer.push_str(&reasoning);
+                    if self.state == SummarizeState::Loading {
+                        self.state = SummarizeState::Streaming;
+                    }
                 }
-                self.summary_text.push_str(&delta);
+                if !content.is_empty() {
+                    self.content_started = true;
+                    self.summary_text.push_str(&content);
+                    if self.state == SummarizeState::Loading {
+                        self.state = SummarizeState::Streaming;
+                    }
+                }
             }
             PluginEvent::SummarizeComplete => {
                 self.state = SummarizeState::Done;
@@ -226,6 +228,72 @@ impl SummarizePlugin {
             }
         }
     }
+}
+
+async fn run_stream(
+    http: reqwest::Client,
+    model: String,
+    system_prompt: String,
+    user_prompt: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+) {
+    let result = stream_inner(
+        http,
+        &model,
+        &system_prompt,
+        user_prompt,
+        api_key.as_deref(),
+        base_url.as_deref(),
+        &tx,
+    )
+    .await;
+    match result {
+        Ok(()) => {
+            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeComplete));
+        }
+        Err(e) => {
+            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeError {
+                message: format!("{e:#}"),
+            }));
+        }
+    }
+}
+
+async fn stream_inner(
+    http: reqwest::Client,
+    model: &str,
+    system_prompt: &str,
+    user_prompt: String,
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+    tx: &tokio::sync::mpsc::UnboundedSender<AppEvent>,
+) -> anyhow::Result<()> {
+    let mut builder = smolllm::stream(user_prompt)
+        .model(model)
+        .system_prompt(system_prompt)
+        .http_client(http);
+    if let Some(key) = api_key {
+        builder = builder.api_key(key);
+    }
+    if let Some(url) = base_url {
+        builder = builder.base_url(url);
+    }
+
+    let mut stream = builder.await.map_err(|e| anyhow!("{e}"))?;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| anyhow!("{e}"))?;
+        if chunk.is_empty() {
+            continue;
+        }
+        let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeChunk {
+            content: chunk.content,
+            reasoning: chunk.reasoning,
+        }));
+    }
+    Ok(())
 }
 
 fn build_prompt(
