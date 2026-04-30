@@ -13,6 +13,7 @@ pub struct PluginContext<'a> {
 
 #[derive(Debug)]
 pub enum PluginEvent {
+    SummarizeStarted { model: String },
     SummarizeChunk { content: String, reasoning: String },
     SummarizeComplete,
     SummarizeError { message: String },
