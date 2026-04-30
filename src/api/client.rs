@@ -1,5 +1,7 @@
 use crate::api::file_cache::{CacheHit, FileCache};
-use crate::api::types::{ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, WebItem, WebStory};
+use crate::api::types::{
+    ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, WebItem, WebStory,
+};
 use crate::logging;
 use anyhow::{anyhow, Context, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -135,7 +137,11 @@ impl HnClient {
     ///
     /// - **HackerWeb**: fetches pre-assembled pages (page 1 + page 2 if count > 30).
     /// - **Firebase**: fetches story IDs then batch-fetches items.
-    pub async fn fetch_initial_stories(&self, feed: FeedKind, count: usize) -> Result<(Vec<u64>, Vec<Story>)> {
+    pub async fn fetch_initial_stories(
+        &self,
+        feed: FeedKind,
+        count: usize,
+    ) -> Result<(Vec<u64>, Vec<Story>)> {
         match self.backend {
             ApiBackend::HackerWeb => {
                 let mut stories = self.fetch_hackerweb_feed(feed, 1).await?;
