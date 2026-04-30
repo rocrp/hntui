@@ -29,12 +29,22 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
 
     let title = match state {
         SummarizeState::Loading => {
-            format!(
-                " Summarizing {spinner} ({} comments){model_tag} ",
-                plugin.comment_count
-            )
+            if plugin.reasoning_buffer.is_empty() {
+                format!(
+                    " Summarizing {spinner} ({} comments){model_tag} ",
+                    plugin.comment_count
+                )
+            } else {
+                format!(" Thinking {spinner}{model_tag} ")
+            }
         }
-        SummarizeState::Streaming => format!(" Summarizing {spinner}{model_tag} "),
+        SummarizeState::Streaming => {
+            if plugin.summary_text.is_empty() {
+                format!(" Thinking {spinner}{model_tag} ")
+            } else {
+                format!(" Summarizing {spinner}{model_tag} ")
+            }
+        }
         SummarizeState::Done => format!(" Summary{model_tag} "),
         SummarizeState::Error => " Summary Error ".to_string(),
         SummarizeState::Idle => return,
