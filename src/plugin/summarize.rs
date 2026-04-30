@@ -2,7 +2,6 @@ use crate::app::AppEvent;
 use crate::plugin::config::SummarizeConfig;
 use crate::plugin::{PluginContext, PluginEvent};
 use crate::ui::comment_view::hn_html_to_plain;
-use anyhow::anyhow;
 use futures::StreamExt;
 use std::time::Instant;
 
@@ -283,10 +282,10 @@ async fn stream_inner(
         builder = builder.base_url(url);
     }
 
-    let mut stream = builder.await.map_err(|e| anyhow!("{e}"))?;
+    let mut stream = builder.await?;
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| anyhow!("{e}"))?;
+        let chunk = chunk?;
         if chunk.is_empty() {
             continue;
         }
