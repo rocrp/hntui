@@ -126,3 +126,6 @@ The `model` field uses smolllm's `provider/model_name` format. Comma-separate
 for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See
 [smolllm-rs](https://github.com/rocrp/smolllm-rs) for the full provider list.
 Optional `base_url` overrides the provider's default endpoint.
+
+`hntui` auto-loads `~/.env.smolllm` if it exists (process env always wins).
+Pass `--env-file <path>` to load a different file explicitly.

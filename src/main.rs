@@ -59,6 +59,11 @@ pub struct Cli {
     /// Plugin config file path (optional; will search defaults).
     #[arg(long)]
     pub plugin_config: Option<PathBuf>,
+
+    /// Env file to load before startup. Existing process env wins.
+    /// If omitted, `~/.env.smolllm` is auto-loaded when present.
+    #[arg(long)]
+    pub env_file: Option<PathBuf>,
 }
 
 impl Cli {
@@ -101,6 +106,9 @@ impl Cli {
                 "--plugin-config must be non-empty"
             );
         }
+        if let Some(path) = &self.env_file {
+            anyhow::ensure!(!path.as_os_str().is_empty(), "--env-file must be non-empty");
+        }
         Ok(())
     }
 }
@@ -141,6 +149,25 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+/// Load env vars from a file (process env always wins).
+///
+/// `--env-file` is loaded explicitly and fails loudly if missing.
+/// Otherwise, `~/.env.smolllm` is auto-loaded when present.
+fn load_env_file(explicit: Option<&std::path::Path>) -> anyhow::Result<()> {
+    if let Some(path) = explicit {
+        dotenvy::from_filename(path)
+            .with_context(|| format!("load --env-file {}", path.display()))?;
+        return Ok(());
+    }
+    if let Some(home) = dirs_home() {
+        let default_path = home.join(".env.smolllm");
+        if default_path.exists() {
+            let _ = dotenvy::from_filename(&default_path);
+        }
+    }
+    Ok(())
+}
+
 fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
     if cli.plugin_config.is_some() {
         return config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml");
@@ -169,6 +196,7 @@ fn resolve_config_save_path(cli: &Cli) -> Option<PathBuf> {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
+    load_env_file(cli.env_file.as_deref())?;
     logging::init(cli.log_file.clone()).context("init logging")?;
     logging::init_log_bridge();
 
