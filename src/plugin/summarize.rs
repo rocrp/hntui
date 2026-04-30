@@ -131,6 +131,8 @@ impl SummarizePlugin {
 
         self.state = SummarizeState::Loading;
         self.summary_text.clear();
+        self.reasoning_buffer.clear();
+        self.content_started = false;
         self.error = None;
         self.scroll_offset = 0;
         self.comment_count = ctx.comment_list.len();
