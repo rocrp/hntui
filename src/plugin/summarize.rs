@@ -288,7 +288,7 @@ async fn stream_inner(
 
     let mut stream = builder.await.context("failed to initialize stream")?;
     let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeStarted {
-        model: stream.model.clone(),
+        model: stream.model().to_string(),
     }));
 
     while let Some(chunk) = stream.next().await {
