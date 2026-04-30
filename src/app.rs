@@ -87,9 +87,9 @@ pub struct SettingsPopup {
     pub editing: bool,
     pub edit_buffer: String,
     pub edit_cursor: usize,
-    pub api_url: String,
     pub model: String,
     pub api_key: String,
+    pub base_url: String,
     pub max_comments: String,
     pub system_prompt: String,
     pub saved_at: Option<Instant>,
@@ -105,9 +105,9 @@ impl SettingsPopup {
                 editing: false,
                 edit_buffer: String::new(),
                 edit_cursor: 0,
-                api_url: c.api_url.clone(),
                 model: c.model.clone(),
-                api_key: c.api_key.clone(),
+                api_key: c.api_key.clone().unwrap_or_default(),
+                base_url: c.base_url.clone().unwrap_or_default(),
                 max_comments: c.max_comments.to_string(),
                 system_prompt: c.system_prompt.clone(),
                 saved_at: None,
@@ -117,9 +117,9 @@ impl SettingsPopup {
                 editing: false,
                 edit_buffer: String::new(),
                 edit_cursor: 0,
-                api_url: String::new(),
                 model: String::new(),
                 api_key: String::new(),
+                base_url: String::new(),
                 max_comments: "200".to_string(),
                 system_prompt: String::new(),
                 saved_at: None,
@@ -129,9 +129,9 @@ impl SettingsPopup {
 
     pub fn field_labels(&self) -> [&str; Self::FIELD_COUNT] {
         [
-            "API URL",
             "Model",
             "API Key",
+            "Base URL",
             "Max Comments",
             "System Prompt",
         ]
@@ -139,9 +139,9 @@ impl SettingsPopup {
 
     pub fn field_values(&self) -> [&str; Self::FIELD_COUNT] {
         [
-            &self.api_url,
             &self.model,
             &self.api_key,
+            &self.base_url,
             &self.max_comments,
             &self.system_prompt,
         ]
@@ -149,9 +149,9 @@ impl SettingsPopup {
 
     fn field_mut(&mut self, idx: usize) -> &mut String {
         match idx {
-            0 => &mut self.api_url,
-            1 => &mut self.model,
-            2 => &mut self.api_key,
+            0 => &mut self.model,
+            1 => &mut self.api_key,
+            2 => &mut self.base_url,
             3 => &mut self.max_comments,
             4 => &mut self.system_prompt,
             _ => unreachable!(),
@@ -2138,10 +2138,21 @@ impl App {
             popup.system_prompt.clone()
         };
 
+        let api_key = if popup.api_key.trim().is_empty() {
+            None
+        } else {
+            Some(popup.api_key.clone())
+        };
+        let base_url = if popup.base_url.trim().is_empty() {
+            None
+        } else {
+            Some(popup.base_url.clone())
+        };
+
         let config = SummarizeConfig {
-            api_url: popup.api_url.clone(),
             model: popup.model.clone(),
-            api_key: popup.api_key.clone(),
+            api_key,
+            base_url,
             max_comments,
             system_prompt,
         };
