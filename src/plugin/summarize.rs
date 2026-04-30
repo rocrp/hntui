@@ -2,6 +2,7 @@ use crate::app::AppEvent;
 use crate::plugin::config::SummarizeConfig;
 use crate::plugin::{PluginContext, PluginEvent};
 use crate::ui::comment_view::hn_html_to_plain;
+use anyhow::Context;
 use futures::StreamExt;
 use std::time::Instant;
 
@@ -285,7 +286,7 @@ async fn stream_inner(
         builder = builder.base_url(url);
     }
 
-    let mut stream = builder.await?;
+    let mut stream = builder.await.context("failed to initialize stream")?;
     let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeStarted {
         model: stream.model.clone(),
     }));
