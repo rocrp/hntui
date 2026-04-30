@@ -181,11 +181,11 @@ Called from `main.rs` once, after `logging::init(...)`. smolllm's retry warnings
 
 - Unit test: `SummarizeConfig` parses new TOML correctly (`config.rs`).
 - Build & typecheck: `cargo check`, `cargo build --release`.
-- Manual smoke test:
-  - Set `model = "openai/gpt-4o-mini"` and `HNTUI_LLM_API_KEY`. Trigger summarize on a story with comments. Confirm content streams.
-  - Set `model = "openai/o1-mini"` (or another reasoning model). Confirm dimmed "Thinking…" preview appears, then is replaced by content.
-  - Set `model = "openai/bogus"` with no API key. Confirm error overlay shows the smolllm error message.
-  - Set `model = "openai/bad, openai/gpt-4o-mini"` (fallback). Confirm summarize succeeds via the second model and the log file shows the fallback notice.
+- Manual smoke test (primary model: `gemini/gemini-flash-lite-latest`):
+  - Set `model = "gemini/gemini-flash-lite-latest"` and `HNTUI_LLM_API_KEY` (or `GEMINI_API_KEY`). Trigger summarize on a story with comments. Confirm content streams.
+  - Repeat with a reasoning model (e.g. `gemini/gemini-2.5-flash-thinking` or `openai/o1-mini`). Confirm dimmed "Thinking…" preview appears, then is replaced by content.
+  - Set `model = "gemini/bogus-model"` with a valid key. Confirm error overlay shows the smolllm error message.
+  - Set `model = "gemini/bogus-model, gemini/gemini-flash-lite-latest"` (fallback). Confirm summarize succeeds via the second model and the log file shows the fallback notice.
 - No live-API integration test in CI.
 
 ## Refactor candidates in smolllm-rs (tracked, not actioned)
