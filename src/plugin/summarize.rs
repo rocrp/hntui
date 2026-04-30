@@ -135,7 +135,7 @@ impl SummarizePlugin {
         self.error = None;
         self.scroll_offset = 0;
         self.comment_count = ctx.comment_list.len();
-        self.model_name = config.model.clone();
+        self.model_name.clear();
         self.copied_flash = None;
         self.story_title = story.title.clone();
         self.story_url = story.url.clone();
@@ -205,6 +205,9 @@ impl SummarizePlugin {
 
     pub fn handle_event(&mut self, event: PluginEvent) {
         match event {
+            PluginEvent::SummarizeStarted { model } => {
+                self.model_name = model;
+            }
             PluginEvent::SummarizeChunk { content, reasoning } => {
                 if !reasoning.is_empty() && !self.content_started {
                     self.reasoning_buffer.push_str(&reasoning);
@@ -283,6 +286,9 @@ async fn stream_inner(
     }
 
     let mut stream = builder.await?;
+    let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeStarted {
+        model: stream.model.clone(),
+    }));
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
