@@ -2138,15 +2138,21 @@ impl App {
             popup.system_prompt.clone()
         };
 
-        let api_key = if popup.api_key.trim().is_empty() {
-            None
-        } else {
-            Some(popup.api_key.clone())
+        let api_key = {
+            let trimmed = popup.api_key.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         };
-        let base_url = if popup.base_url.trim().is_empty() {
-            None
-        } else {
-            Some(popup.base_url.clone())
+        let base_url = {
+            let trimmed = popup.base_url.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         };
 
         let config = SummarizeConfig {
