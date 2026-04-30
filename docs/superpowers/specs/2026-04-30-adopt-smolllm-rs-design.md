@@ -59,7 +59,7 @@ API key resolution precedence (highest first):
 2. config `api_key` field
 3. smolllm-resolved `{PROVIDER}_API_KEY` env var (e.g. `OPENAI_API_KEY`)
 
-`SummarizeConfig::resolve_api_key()` returns `Option<String>` for items 1+2; passes `None` to smolllm when neither is set, letting smolllm fall through to its own env-var resolution.
+`SummarizeConfig::resolve_api_key()` returns `Option<String>` for items 1+2. When `None`, the call site simply does not invoke `.api_key(...)` on the smolllm builder, letting smolllm fall through to its own env-var resolution.
 
 ## Data flow
 
