@@ -53,18 +53,25 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
 
     let lines: Vec<Line> = match state {
         SummarizeState::Loading => {
-            vec![Line::from(Span::styled(
-                format!("Waiting for LLM response {spinner}"),
-                theme::HINT,
-            ))]
-        }
-        SummarizeState::Streaming | SummarizeState::Done => {
-            let mut l = markdown::render_markdown(&plugin.summary_text);
-            if state == SummarizeState::Streaming {
-                l.push(Line::from(Span::styled(format!("{spinner}"), theme::HINT)));
+            if plugin.reasoning_buffer.is_empty() {
+                vec![Line::from(Span::styled(
+                    format!("Waiting for LLM response {spinner}"),
+                    theme::HINT,
+                ))]
+            } else {
+                reasoning_lines(&plugin.reasoning_buffer, spinner, true)
             }
-            l
         }
+        SummarizeState::Streaming => {
+            if plugin.summary_text.is_empty() {
+                reasoning_lines(&plugin.reasoning_buffer, spinner, true)
+            } else {
+                let mut l = markdown::render_markdown(&plugin.summary_text);
+                l.push(Line::from(Span::styled(format!("{spinner}"), theme::HINT)));
+                l
+            }
+        }
+        SummarizeState::Done => markdown::render_markdown(&plugin.summary_text),
         SummarizeState::Error => {
             let msg = plugin.error.as_deref().unwrap_or("Unknown error");
             vec![Line::from(Span::styled(msg.to_string(), theme::ERROR))]
@@ -97,4 +104,26 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     };
     let hint_paragraph = Paragraph::new(hint_line).style(theme::POPUP);
     frame.render_widget(hint_paragraph, hint_area);
+}
+
+fn reasoning_lines(buffer: &str, spinner: char, streaming: bool) -> Vec<Line<'static>> {
+    use ratatui::style::{Modifier, Style};
+
+    let dim_style = Style::default()
+        .fg(theme::OVERLAY0)
+        .add_modifier(Modifier::DIM | Modifier::ITALIC);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let label = if streaming {
+        format!("Thinking {spinner}")
+    } else {
+        "Thinking".to_string()
+    };
+    lines.push(Line::from(Span::styled(label, theme::HINT)));
+    lines.push(Line::raw(""));
+
+    for raw in buffer.lines() {
+        lines.push(Line::from(Span::styled(raw.to_string(), dim_style)));
+    }
+    lines
 }
