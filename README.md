@@ -115,10 +115,14 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/plugin-config.toml
 export HNTUI_LLM_API_KEY="your-key-here"
 ```
 
-Or set `api_key` in `plugin-config.toml`. Default uses Gemini (`gemini-flash-lite-latest`). For OpenAI or compatible APIs:
+Or set `api_key` in `plugin-config.toml`. Default uses Gemini (`gemini/gemini-flash-lite-latest`). For OpenAI:
 
 ```toml
 [summarize]
-api_url = "https://api.openai.com/v1/chat/completions"
-model = "gpt-4o-mini"
+model = "openai/gpt-4o-mini"
 ```
+
+The `model` field uses smolllm's `provider/model_name` format. Comma-separate
+for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See
+[smolllm-rs](https://github.com/rocrp/smolllm-rs) for the full provider list.
+Optional `base_url` overrides the provider's default endpoint.

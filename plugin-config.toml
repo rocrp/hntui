@@ -1,7 +1,13 @@
 [summarize]
-api_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-model = "gemini-flash-lite-latest"
-# API key: set HNTUI_LLM_API_KEY env var (preferred) or uncomment below
+model = "gemini/gemini-flash-lite-latest"
+
+# API key: set HNTUI_LLM_API_KEY env var (preferred) or uncomment below.
+# Smolllm also accepts {PROVIDER}_API_KEY (e.g. GEMINI_API_KEY).
 # api_key = ""
+
+# Optional base URL override (defaults to provider's standard URL).
+# Useful for proxies or self-hosted endpoints.
+# base_url = ""
+
 max_comments = 200
 system_prompt = "Summarize this Hacker News discussion concisely. Highlight key arguments, disagreements, and consensus points."
