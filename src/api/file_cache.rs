@@ -78,15 +78,12 @@ impl FileCache {
             .await
             .with_context(|| format!("read cache dir {}", self.items_dir.display()))?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .context("read cache dir entry")?
-        {
+        while let Some(entry) = entries.next_entry().await.context("read cache dir entry")? {
             let path = entry.path();
-            let file_type = entry.file_type().await.with_context(|| {
-                format!("stat cache entry {}", path.display())
-            })?;
+            let file_type = entry
+                .file_type()
+                .await
+                .with_context(|| format!("stat cache entry {}", path.display()))?;
             if !file_type.is_file() {
                 return Err(anyhow::anyhow!(
                     "unexpected non-file in cache dir {}",

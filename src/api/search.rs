@@ -57,11 +57,7 @@ impl SearchClient {
 
     /// Search stories via Algolia HN Search API.
     /// Returns `(stories, has_more_pages)`.
-    pub async fn search_stories(
-        &self,
-        query: &str,
-        page: u32,
-    ) -> Result<(Vec<Story>, bool)> {
+    pub async fn search_stories(&self, query: &str, page: u32) -> Result<(Vec<Story>, bool)> {
         let url = "https://hn.algolia.com/api/v1/search";
         logging::log_info(format!("algolia: searching query={query:?} page={page}"));
 
