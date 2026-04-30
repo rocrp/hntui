@@ -1,0 +1,4 @@
+[net]
+# Use the git CLI for fetching git deps so user-level git config
+# (e.g. url.insteadOf rewrites, ssh-agent auth) is respected.
+git-fetch-with-cli = true
