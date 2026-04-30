@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
         let display_value = if is_editing {
             String::new()
-        } else if i == 2 && !values[i].is_empty() {
+        } else if i == 1 && !values[i].is_empty() {
             let v = values[i];
             if v.len() > 4 {
                 format!("{}...{}", &v[..2], &v[v.len() - 2..])
