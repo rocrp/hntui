@@ -170,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     cli.validate()?;
     logging::init(cli.log_file.clone()).context("init logging")?;
+    logging::init_log_bridge();
 
     let plugin_candidates = plugin_config_candidates(&cli);
     let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)
