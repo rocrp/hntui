@@ -178,7 +178,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut line_idx = 0usize;
         let dim_target = theme::OVERLAY0;
         'outer: for (idx, lines) in comment_lines.iter().enumerate() {
-            for (line_in_comment, line) in lines.iter().enumerate() {
+            for line in lines {
                 if line_idx >= start && line_idx < end {
                     let mut line = line.clone();
                     let dist = if line_idx < sel_start {
@@ -209,8 +209,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                         );
                     }
 
-                    if idx == selected && line_in_comment == 0 {
-                        line = line.patch_style(theme::SELECTED);
+                    if idx == selected {
+                        line = highlight_line_to_width(line, content_width);
                     }
                     visible_lines.push(line);
                 }
@@ -316,6 +316,23 @@ fn collapse_spaces(s: &str) -> String {
         }
     }
     out
+}
+
+fn highlight_line_to_width(mut line: Line<'_>, width: usize) -> Line<'_> {
+    let line_width = line
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+
+    if line_width < width {
+        line.spans.push(Span::styled(
+            " ".repeat(width - line_width),
+            theme::SELECTED,
+        ));
+    }
+
+    line.patch_style(theme::SELECTED)
 }
 
 enum ContentLine {

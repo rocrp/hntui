@@ -98,6 +98,40 @@ pub fn load_plugin_config(candidates: &[PathBuf]) -> Result<Option<PluginConfig>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        var: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(var: &'static str, value: &str) -> Self {
+            let prev = std::env::var(var).ok();
+            std::env::set_var(var, value);
+            Self { var, prev }
+        }
+
+        fn unset(var: &'static str) -> Self {
+            let prev = std::env::var(var).ok();
+            std::env::remove_var(var);
+            Self { var, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => std::env::set_var(self.var, value),
+                None => std::env::remove_var(self.var),
+            }
+        }
+    }
 
     #[test]
     fn parses_minimal_config() {
@@ -134,9 +168,9 @@ mod tests {
 
     #[test]
     fn resolve_api_key_prefers_env_var() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
         let var = "HNTUI_LLM_API_KEY";
-        let prev = std::env::var(var).ok();
-        std::env::set_var(var, "from-env");
+        let _env = EnvVarGuard::set(var, "from-env");
         let cfg = SummarizeConfig {
             model: "openai/x".into(),
             api_key: Some("from-config".into()),
@@ -145,17 +179,13 @@ mod tests {
             system_prompt: String::new(),
         };
         assert_eq!(cfg.resolve_api_key().as_deref(), Some("from-env"));
-        match prev {
-            Some(v) => std::env::set_var(var, v),
-            None => std::env::remove_var(var),
-        }
     }
 
     #[test]
     fn resolve_api_key_falls_back_to_config() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
         let var = "HNTUI_LLM_API_KEY";
-        let prev = std::env::var(var).ok();
-        std::env::remove_var(var);
+        let _env = EnvVarGuard::unset(var);
         let cfg = SummarizeConfig {
             model: "openai/x".into(),
             api_key: Some("from-config".into()),
@@ -164,16 +194,13 @@ mod tests {
             system_prompt: String::new(),
         };
         assert_eq!(cfg.resolve_api_key().as_deref(), Some("from-config"));
-        if let Some(v) = prev {
-            std::env::set_var(var, v);
-        }
     }
 
     #[test]
     fn resolve_api_key_returns_none_when_unset() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
         let var = "HNTUI_LLM_API_KEY";
-        let prev = std::env::var(var).ok();
-        std::env::remove_var(var);
+        let _env = EnvVarGuard::unset(var);
         let cfg = SummarizeConfig {
             model: "openai/x".into(),
             api_key: None,
@@ -182,8 +209,5 @@ mod tests {
             system_prompt: String::new(),
         };
         assert!(cfg.resolve_api_key().is_none());
-        if let Some(v) = prev {
-            std::env::set_var(var, v);
-        }
     }
 }
