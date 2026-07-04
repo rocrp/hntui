@@ -26,13 +26,18 @@ struct AlgoliaHit {
 }
 
 impl AlgoliaHit {
-    fn into_story(self) -> Option<Story> {
-        let id: u64 = self.object_id.parse().ok()?;
-        let title = self.title?;
+    fn into_story(self) -> Result<Option<Story>> {
+        let id: u64 = self
+            .object_id
+            .parse()
+            .with_context(|| format!("parse Algolia objectID {:?}", self.object_id))?;
+        let Some(title) = self.title else {
+            return Ok(None);
+        };
         if title.is_empty() {
-            return None;
+            return Ok(None);
         }
-        Some(Story {
+        Ok(Some(Story {
             id,
             title,
             url: self.url.filter(|u| !u.is_empty()),
@@ -41,7 +46,7 @@ impl AlgoliaHit {
             time: self.created_at_i.unwrap_or(0),
             comment_count: self.num_comments.unwrap_or(0),
             kids: vec![],
-        })
+        }))
     }
 }
 
@@ -80,11 +85,12 @@ impl SearchClient {
             .context("decode algolia search")?;
 
         let has_more = resp.page + 1 < resp.nb_pages;
-        let stories: Vec<Story> = resp
-            .hits
-            .into_iter()
-            .filter_map(AlgoliaHit::into_story)
-            .collect();
+        let mut stories = Vec::new();
+        for hit in resp.hits {
+            if let Some(story) = hit.into_story()? {
+                stories.push(story);
+            }
+        }
 
         Ok((stories, has_more))
     }

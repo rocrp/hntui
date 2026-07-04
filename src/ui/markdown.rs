@@ -95,7 +95,6 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                     let top = current_style(&style_stack, base_style);
                     let link_style = top.fg(theme::BLUE).add_modifier(Modifier::UNDERLINED);
                     style_stack.push(link_style);
-                    style_stack.push(Style::default()); // sentinel
                     let _ = dest_url;
                 }
                 _ => {}
@@ -134,14 +133,13 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                     need_paragraph_break = true;
                 }
                 TagEnd::Link => {
-                    style_stack.pop(); // sentinel
-                    style_stack.pop(); // link style
+                    style_stack.pop();
                 }
                 _ => {}
             },
             Event::Text(text) => {
                 if in_code_block {
-                    for line_str in text.split('\n') {
+                    for line_str in text.lines() {
                         if !current_spans.is_empty() {
                             flush_line(&mut lines, &mut current_spans, &prefix_spans);
                         }
@@ -200,4 +198,57 @@ fn flush_line(
     let mut spans = prefix_spans.to_vec();
     spans.append(current_spans);
     lines.push(Line::from(spans));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_texts(input: &str) -> Vec<String> {
+        render_markdown(input)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn renders_heading_and_paragraph_spacing() {
+        let lines = line_texts("# Title\n\nBody **strong** and *em*");
+
+        assert_eq!(lines, vec!["Title", "", "Body strong and em"]);
+    }
+
+    #[test]
+    fn renders_nested_unordered_and_ordered_lists() {
+        let lines = line_texts("- parent\n  - child\n\n3. third\n4. fourth");
+
+        assert_eq!(
+            lines,
+            vec!["- parent", "  - child", "", "3. third", "4. fourth"]
+        );
+    }
+
+    #[test]
+    fn renders_block_quotes_and_code_blocks() {
+        let lines = line_texts("> quoted\n\n```\nlet x = 1;\n```");
+
+        assert_eq!(lines, vec!["> quoted", "", "  let x = 1;"]);
+    }
+
+    #[test]
+    fn renders_links_as_underlined_text_without_url_suffix() {
+        let lines = render_markdown("[site](https://example.com)");
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].spans[0].content, "site");
+        assert!(lines[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
 }

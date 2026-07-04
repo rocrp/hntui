@@ -125,10 +125,9 @@ fn now_unix() -> Result<i64> {
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system time before unix epoch")?;
-    Ok(dur
-        .as_secs()
+    dur.as_secs()
         .try_into()
-        .context("unix seconds overflow i64")?)
+        .context("unix seconds overflow i64")
 }
 
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -157,5 +156,112 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         Err(err) => {
             Err(err).with_context(|| format!("rename {} -> {}", tmp_path.display(), path.display()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::types::HnItemKind;
+
+    fn temp_cache_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("hntui-{name}-{}-{unique}", std::process::id()))
+    }
+
+    fn item(id: u64) -> HnItem {
+        HnItem {
+            id,
+            kind: Some(HnItemKind::Story),
+            by: Some("alice".to_string()),
+            time: Some(1),
+            title: Some(format!("story {id}")),
+            url: None,
+            text: None,
+            score: Some(1),
+            descendants: Some(0),
+            kids: None,
+            dead: None,
+            deleted: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn get_item_reports_fresh_and_stale_hits() {
+        let dir = temp_cache_dir("fresh-stale");
+        let cache = FileCache::new(dir.clone(), Duration::from_secs(60)).expect("create cache");
+
+        cache.put_item(1, item(1)).await.expect("put fresh item");
+        match cache
+            .get_item_with_staleness(1)
+            .await
+            .expect("get fresh item")
+            .expect("fresh hit")
+        {
+            CacheHit::Fresh(hit) => assert_eq!(hit.id, 1),
+            CacheHit::Stale { .. } => panic!("expected fresh hit"),
+        }
+
+        let stale = CachedItem {
+            fetched_at: now_unix().expect("now") - 120,
+            item: item(2),
+        };
+        fs::write(
+            cache.item_path(2),
+            serde_json::to_vec(&stale).expect("encode stale item"),
+        )
+        .await
+        .expect("write stale item");
+
+        match cache
+            .get_item_with_staleness(2)
+            .await
+            .expect("get stale item")
+            .expect("stale hit")
+        {
+            CacheHit::Fresh(_) => panic!("expected stale hit"),
+            CacheHit::Stale { item, stale_secs } => {
+                assert_eq!(item.id, 2);
+                assert!(stale_secs >= 120);
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_removes_stale_and_stray_files_only() {
+        let dir = temp_cache_dir("cleanup");
+        let cache = FileCache::new(dir.clone(), Duration::from_secs(60)).expect("create cache");
+
+        cache.put_item(1, item(1)).await.expect("put fresh item");
+        let stale = CachedItem {
+            fetched_at: now_unix().expect("now") - 600,
+            item: item(2),
+        };
+        fs::write(
+            cache.item_path(2),
+            serde_json::to_vec(&stale).expect("encode stale item"),
+        )
+        .await
+        .expect("write stale item");
+        fs::write(cache.items_dir.join("stray.txt"), b"junk")
+            .await
+            .expect("write stray file");
+
+        let removed = cache
+            .cleanup_expired(Duration::from_secs(300))
+            .await
+            .expect("cleanup");
+
+        assert_eq!(removed, 2);
+        assert!(cache.item_path(1).exists());
+        assert!(!cache.item_path(2).exists());
+        assert!(!cache.items_dir.join("stray.txt").exists());
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

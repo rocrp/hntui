@@ -82,10 +82,9 @@ fn now_unix() -> Result<i64> {
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system time before unix epoch")?;
-    Ok(dur
-        .as_secs()
+    dur.as_secs()
         .try_into()
-        .context("unix seconds overflow i64")?)
+        .context("unix seconds overflow i64")
 }
 
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {

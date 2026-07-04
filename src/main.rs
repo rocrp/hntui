@@ -172,7 +172,6 @@ fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
     if cli.plugin_config.is_some() {
         return config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml");
     }
-    // Search config.toml first, then legacy plugin-config.toml for migration
     let mut candidates = config_candidates(None, "config.toml");
     candidates.extend(config_candidates(None, "plugin-config.toml"));
     candidates

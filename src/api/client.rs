@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{broadcast, Mutex, Semaphore};
 
 #[derive(Debug, Clone)]
@@ -29,15 +29,15 @@ pub struct HnClient {
     file_cache: Option<Arc<FileCache>>,
     concurrency: usize,
     revalidate_semaphore: Arc<Semaphore>,
-    in_flight: Arc<Mutex<HashMap<u64, broadcast::Sender<Result<HnItem, String>>>>>,
-    story_ids_cache: Arc<Mutex<HashMap<FeedKind, (Vec<u64>, Instant)>>>,
+    in_flight: InFlightItems,
 }
+
+type InFlightItems = Arc<Mutex<HashMap<u64, ItemFlightSender>>>;
+type ItemFlightSender = broadcast::Sender<Result<HnItem, String>>;
 
 const COMMENT_PREFETCH_EXTRA_DEPTH: usize = 2;
 const COMMENT_PREFETCH_CHILD_CONCURRENCY: usize = 8;
 const REVALIDATE_CONCURRENCY: usize = 4;
-#[allow(dead_code)]
-const STORY_IDS_CACHE_TTL: Duration = Duration::from_secs(60);
 const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
 impl HnClient {
@@ -70,32 +70,7 @@ impl HnClient {
             concurrency,
             revalidate_semaphore: Arc::new(Semaphore::new(REVALIDATE_CONCURRENCY)),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
-            story_ids_cache: Arc::new(Mutex::new(HashMap::new())),
         })
-    }
-
-    #[allow(dead_code)]
-    pub async fn fetch_story_ids(&self, feed: FeedKind) -> Result<Vec<u64>> {
-        {
-            let cache = self.story_ids_cache.lock().await;
-            if let Some((ids, fetched_at)) = cache.get(&feed) {
-                if fetched_at.elapsed() < STORY_IDS_CACHE_TTL {
-                    return Ok(ids.clone());
-                }
-            }
-        }
-
-        let ids = self.fetch_story_ids_network(feed).await?;
-        let mut cache = self.story_ids_cache.lock().await;
-        cache.insert(feed, (ids.clone(), Instant::now()));
-        Ok(ids)
-    }
-
-    pub async fn fetch_story_ids_force(&self, feed: FeedKind) -> Result<Vec<u64>> {
-        let ids = self.fetch_story_ids_network(feed).await?;
-        let mut cache = self.story_ids_cache.lock().await;
-        cache.insert(feed, (ids.clone(), Instant::now()));
-        Ok(ids)
     }
 
     async fn fetch_story_ids_network(&self, feed: FeedKind) -> Result<Vec<u64>> {
@@ -154,7 +129,7 @@ impl HnClient {
                 Ok((ids, stories))
             }
             ApiBackend::Firebase => {
-                let story_ids = self.fetch_story_ids_force(feed).await?;
+                let story_ids = self.fetch_story_ids_network(feed).await?;
                 let ids: Vec<u64> = story_ids.iter().copied().take(count).collect();
                 let stories = self.fetch_stories_batch(&ids).await?;
                 Ok((story_ids, stories))
@@ -371,7 +346,7 @@ impl HnClient {
         }
 
         let child_concurrency = self.concurrency.min(COMMENT_PREFETCH_CHILD_CONCURRENCY);
-        let child_results = stream::iter(child_batches.into_iter())
+        let child_results = stream::iter(child_batches)
             .map(|(idx, kids)| async move {
                 let children = self
                     .fetch_comment_nodes_prefetch(&kids, depth + 1, prefetch_extra_depth - 1)

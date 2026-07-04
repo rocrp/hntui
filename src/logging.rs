@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct LogState {
     file: Mutex<Option<File>>,
     path: Option<PathBuf>,
+    write_error: Mutex<Option<String>>,
 }
 
 static LOG: OnceLock<LogState> = OnceLock::new();
@@ -25,6 +26,7 @@ pub fn init(log_file: Option<PathBuf>) -> Result<()> {
     LOG.set(LogState {
         file: Mutex::new(file),
         path,
+        write_error: Mutex::new(None),
     })
     .map_err(|_| anyhow!("log already initialized"))?;
 
@@ -34,6 +36,10 @@ pub fn init(log_file: Option<PathBuf>) -> Result<()> {
 
 pub fn log_path() -> Option<&'static Path> {
     LOG.get()?.path.as_deref()
+}
+
+pub fn last_write_error() -> Option<String> {
+    LOG.get()?.write_error.lock().ok()?.clone()
 }
 
 pub fn log_error(message: impl AsRef<str>) {
@@ -49,15 +55,20 @@ fn log_line(level: &str, message: &str) {
         return;
     };
     let mut guard = state.file.lock().expect("log mutex poisoned");
-    let Some(mut file) = guard.take() else {
+    let Some(file) = guard.as_mut() else {
         return;
     };
     let ts = unix_ts();
     let line = format!("{ts} {level} {message}\n");
-    match file.write_all(line.as_bytes()) {
-        Ok(()) => *guard = Some(file),
-        Err(err) => {
-            eprintln!("hntui: log write failed: {err}");
+    if let Err(err) = file.write_all(line.as_bytes()) {
+        let path = state
+            .path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let message = format!("write log file {path}: {err}");
+        if let Ok(mut write_error) = state.write_error.lock() {
+            *write_error = Some(message);
         }
     }
 }

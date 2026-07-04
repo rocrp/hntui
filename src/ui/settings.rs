@@ -1,5 +1,6 @@
 use crate::app::{App, SettingsPopup};
 use crate::ui::theme;
+use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
@@ -10,35 +11,38 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     };
     let area = frame.area();
-    if area.width < 20 || area.height < 10 {
+    let Some(popup_rect) = popup_rect(area) else {
         return;
-    }
+    };
 
-    let labels = popup.field_labels();
-    let values = popup.field_values();
-    let max_label_len = labels.iter().map(|l| l.len()).max().unwrap_or(0);
+    let fields = SettingsPopup::fields();
+    let max_label_len = fields
+        .iter()
+        .map(|field| field.label().len())
+        .max()
+        .unwrap_or(0);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled("Settings", theme::HEADER)));
     lines.push(Line::raw(""));
 
-    for i in 0..SettingsPopup::FIELD_COUNT {
+    for (i, field) in fields.iter().copied().enumerate() {
         let is_cursor = i == popup.cursor;
         let is_editing = is_cursor && popup.editing;
         let marker = if is_cursor { "> " } else { "  " };
-        let padded_label = format!("{:width$}", labels[i], width = max_label_len);
+        let padded_label = format!("{:width$}", field.label(), width = max_label_len);
+        let value = popup.field_value(field);
 
         let display_value = if is_editing {
             String::new()
-        } else if i == 1 && !values[i].is_empty() {
-            let v = values[i];
-            if v.len() > 4 {
-                format!("{}...{}", &v[..2], &v[v.len() - 2..])
+        } else if field.is_secret() && !value.is_empty() {
+            if value.len() > 4 {
+                format!("{}...{}", &value[..2], &value[value.len() - 2..])
             } else {
-                "*".repeat(v.len())
+                "*".repeat(value.len())
             }
         } else {
-            values[i].to_string()
+            value.to_string()
         };
 
         let style = if is_editing {
@@ -102,10 +106,6 @@ pub fn render(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    let desired_width = area.width.min(60);
-    let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);
-    let popup_rect = super::centered(area, desired_width, desired_height);
-
     frame.render_widget(Clear, popup_rect);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -114,4 +114,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .block(block)
         .style(theme::POPUP);
     frame.render_widget(paragraph, popup_rect);
+}
+
+pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
+    if area.width < 20 || area.height < 10 {
+        return None;
+    }
+    let line_count = SettingsPopup::FIELD_COUNT + 5;
+    let desired_width = area.width.min(60);
+    let desired_height = (line_count as u16).saturating_add(2).min(area.height);
+    Some(super::centered(area, desired_width, desired_height))
 }

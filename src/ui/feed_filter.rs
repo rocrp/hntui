@@ -1,6 +1,7 @@
 use crate::api::FeedKind;
 use crate::app::App;
 use crate::ui::theme;
+use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -10,9 +11,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     };
     let area = frame.area();
-    if area.width < 10 || area.height < 6 {
+    let Some(popup_rect) = popup_rect(area) else {
         return;
-    }
+    };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled("Feed", theme::HEADER)));
@@ -46,10 +47,6 @@ pub fn render(frame: &mut Frame, app: &App) {
         Span::styled(":close", theme::HINT),
     ]));
 
-    let desired_width = area.width.min(40);
-    let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);
-    let popup_rect = super::centered(area, desired_width, desired_height);
-
     frame.render_widget(Clear, popup_rect);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -59,4 +56,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         .block(block)
         .style(theme::POPUP);
     frame.render_widget(paragraph, popup_rect);
+}
+
+pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
+    if area.width < 10 || area.height < 6 {
+        return None;
+    }
+    let line_count = FeedKind::ALL.len() + 4;
+    let desired_width = area.width.min(40);
+    let desired_height = (line_count as u16).saturating_add(2).min(area.height);
+    Some(super::centered(area, desired_width, desired_height))
 }

@@ -1,23 +1,19 @@
 use crate::plugin::summarize::{SummarizePlugin, SummarizeState};
 use crate::ui::{markdown, theme};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
+pub fn render(frame: &mut Frame, plugin: &SummarizePlugin, spinner: char) {
     if !plugin.is_overlay_visible() {
         return;
     }
 
     let area = frame.area();
-    if area.width < 12 || area.height < 8 {
+    let Some(popup) = popup_rect(area) else {
         return;
-    }
-
-    let popup_w = (area.width * 4 / 5).max(30);
-    let popup_h = (area.height * 4 / 5).max(10);
-    let popup = super::centered(area, popup_w, popup_h);
+    };
 
     let state = plugin.state();
 
@@ -58,8 +54,6 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
     let content_area = layout[0];
     let hint_area = layout[1];
-
-    plugin.content_height = content_area.height as usize;
 
     let lines: Vec<Line> = match state {
         SummarizeState::Loading => {
@@ -114,6 +108,23 @@ pub fn render(frame: &mut Frame, plugin: &mut SummarizePlugin, spinner: char) {
     };
     let hint_paragraph = Paragraph::new(hint_line).style(theme::POPUP);
     frame.render_widget(hint_paragraph, hint_area);
+}
+
+pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
+    if area.width < 12 || area.height < 8 {
+        return None;
+    }
+    let popup_w = (area.width * 4 / 5).max(30);
+    let popup_h = (area.height * 4 / 5).max(10);
+    Some(super::centered(area, popup_w, popup_h))
+}
+
+pub(crate) fn content_height(area: Rect) -> Option<usize> {
+    let popup = popup_rect(area)?;
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(popup);
+    let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+    Some(layout[0].height as usize)
 }
 
 fn reasoning_lines(buffer: &str, spinner: char, streaming: bool) -> Vec<Line<'static>> {

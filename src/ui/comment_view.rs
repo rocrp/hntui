@@ -1,14 +1,14 @@
-use crate::app::{App, LayoutAreas};
+use crate::app::App;
 use crate::ui::theme;
 use crate::ui::{format_age, format_error, now_unix};
 use html_escape::decode_html_entities;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     let spinner = app.spinner_frame();
@@ -26,120 +26,25 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let [list_area, footer_area] = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
-        .areas(inner);
-
-    app.layout_areas = LayoutAreas {
-        list_area,
-        frame_area: area,
-    };
-    let comment_max_lines = theme::COMMENT_MAX_LINES.unwrap_or(usize::MAX);
+    let (list_area, footer_area) = super::list_footer_areas(inner);
     let content_width = list_area.width as usize;
 
     if app.comment_loading && app.comment_list.is_empty() {
-        app.comment_item_heights.clear();
-        app.comment_line_offset = 0;
-        app.comment_viewport_height = list_area.height as usize;
-        app.comment_page_size = app.comment_viewport_height.max(1);
-
         let items = vec![ListItem::new(Line::from(format!("Loading {spinner}")))];
         let list = List::new(items)
             .highlight_symbol("")
             .highlight_style(theme::SELECTED);
-        frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
+        let mut state = app.comment_list_state.clone();
+        frame.render_stateful_widget(list, list_area, &mut state);
     } else if app.comment_list.is_empty() {
-        app.comment_item_heights.clear();
-        app.comment_line_offset = 0;
-        app.comment_viewport_height = list_area.height as usize;
-        app.comment_page_size = app.comment_viewport_height.max(1);
-
         let items = vec![ListItem::new(Line::from("No comments."))];
         let list = List::new(items)
             .highlight_symbol("")
             .highlight_style(theme::SELECTED);
-        frame.render_stateful_widget(list, list_area, &mut app.comment_list_state);
+        let mut state = app.comment_list_state.clone();
+        frame.render_stateful_widget(list, list_area, &mut state);
     } else {
-        let now = now_unix();
-        let mut comment_lines = Vec::with_capacity(app.comment_list.len());
-
-        for comment in &app.comment_list {
-            let indent = "│ ".repeat(comment.depth);
-            let indent_width = indent.chars().count();
-            let indent_style = Style::default().fg(theme::comment_indent_color(comment.depth));
-            let marker_style = indent_style.add_modifier(Modifier::BOLD);
-
-            let thread_marker = if comment.kids.is_empty() {
-                ' '
-            } else if comment.collapsed {
-                '▸'
-            } else if comment.children_loading {
-                spinner
-            } else {
-                '▾'
-            };
-
-            let by = comment.by.as_deref().unwrap_or("[unknown]").to_string();
-            let age = comment
-                .time
-                .map(|t| format_age(t, now))
-                .unwrap_or_else(|| "?".to_string());
-
-            let author_style = Style::default()
-                .fg(theme::comment_indent_color(comment.depth))
-                .add_modifier(Modifier::BOLD);
-
-            let header_spans = vec![
-                Span::styled(indent.clone(), indent_style),
-                Span::styled(format!("{thread_marker} "), marker_style),
-                Span::styled(by, author_style),
-                Span::styled(format!(" · {age}"), theme::META),
-            ];
-
-            let mut lines = Vec::new();
-            lines.push(Line::from(header_spans));
-
-            let body_indent = format!("{indent}  ");
-            let body_width = content_width.saturating_sub(indent_width + 2).max(1);
-            let plain = hn_html_to_plain(&comment.text);
-            let content_style = Style::default().fg(theme::TEXT);
-
-            if !plain.is_empty() {
-                let wrapped = wrap_content(&plain, body_width, comment_max_lines);
-                for wline in wrapped {
-                    match wline {
-                        ContentLine::Normal(text) => {
-                            lines.push(Line::from(vec![
-                                Span::styled(body_indent.clone(), indent_style),
-                                Span::styled(text, content_style),
-                            ]));
-                        }
-                        ContentLine::Quote(text) => {
-                            lines.push(Line::from(vec![
-                                Span::styled(body_indent.clone(), indent_style),
-                                Span::styled("▎ ", theme::QUOTE_BAR),
-                                Span::styled(text, theme::QUOTE),
-                            ]));
-                        }
-                        ContentLine::Blank => {
-                            lines.push(Line::from(Span::styled(body_indent.clone(), indent_style)));
-                        }
-                    }
-                }
-            }
-
-            if lines.is_empty() {
-                lines.push(Line::from(""));
-            }
-
-            comment_lines.push(lines);
-        }
-
-        app.comment_item_heights = comment_lines
-            .iter()
-            .map(|lines| lines.len().max(1))
-            .collect();
+        let comment_lines = build_comment_lines(app, content_width, spinner);
 
         let mut line_starts = Vec::with_capacity(app.comment_item_heights.len() + 1);
         line_starts.push(0usize);
@@ -149,23 +54,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             line_starts.push(cumsum);
         }
 
-        app.comment_viewport_height = list_area.height as usize;
         let total_lines: usize = app.comment_item_heights.iter().sum();
-        let avg_height = if app.comment_item_heights.is_empty() {
-            1
-        } else {
-            (total_lines / app.comment_item_heights.len()).max(1)
-        };
         let viewport_height = app.comment_viewport_height.max(1);
-        app.comment_page_size = (viewport_height / avg_height).max(1);
-
-        if app.comment_list_state.selected().is_none() {
-            app.comment_list_state.select(Some(0));
-        }
-        app.ensure_comment_line_offset();
-
-        let max_offset = total_lines.saturating_sub(viewport_height);
-        app.comment_line_offset = app.comment_line_offset.min(max_offset);
         let start = app.comment_line_offset;
         let end = (start + viewport_height).min(total_lines);
 
@@ -258,6 +148,101 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         app.comment_list.len()
     ));
     frame.render_widget(Paragraph::new(vec![meta, help]), footer_inner);
+}
+
+pub(crate) fn content_areas(area: Rect) -> (Rect, Rect) {
+    super::bordered_list_footer_areas(area)
+}
+
+pub(crate) fn measure_item_heights(app: &App, list_area: Rect) -> Vec<usize> {
+    if app.comment_list.is_empty() {
+        return Vec::new();
+    }
+    let spinner = app.spinner_frame();
+    build_comment_lines(app, list_area.width as usize, spinner)
+        .iter()
+        .map(|lines| lines.len().max(1))
+        .collect()
+}
+
+fn build_comment_lines(app: &App, content_width: usize, spinner: char) -> Vec<Vec<Line<'static>>> {
+    let comment_max_lines = theme::COMMENT_MAX_LINES.unwrap_or(usize::MAX);
+    let now = now_unix();
+    let mut comment_lines = Vec::with_capacity(app.comment_list.len());
+
+    for comment in &app.comment_list {
+        let indent = "│ ".repeat(comment.depth);
+        let indent_width = indent.chars().count();
+        let indent_style = Style::default().fg(theme::comment_indent_color(comment.depth));
+        let marker_style = indent_style.add_modifier(Modifier::BOLD);
+
+        let thread_marker = if comment.kids.is_empty() {
+            ' '
+        } else if comment.collapsed {
+            '▸'
+        } else if comment.children_loading {
+            spinner
+        } else {
+            '▾'
+        };
+
+        let by = comment.by.as_deref().unwrap_or("[unknown]").to_string();
+        let age = comment
+            .time
+            .map(|t| format_age(t, now))
+            .unwrap_or_else(|| "?".to_string());
+
+        let author_style = Style::default()
+            .fg(theme::comment_indent_color(comment.depth))
+            .add_modifier(Modifier::BOLD);
+
+        let header_spans = vec![
+            Span::styled(indent.clone(), indent_style),
+            Span::styled(format!("{thread_marker} "), marker_style),
+            Span::styled(by, author_style),
+            Span::styled(format!(" · {age}"), theme::META),
+        ];
+
+        let mut lines = Vec::new();
+        lines.push(Line::from(header_spans));
+
+        let body_indent = format!("{indent}  ");
+        let body_width = content_width.saturating_sub(indent_width + 2).max(1);
+        let plain = hn_html_to_plain(&comment.text);
+        let content_style = Style::default().fg(theme::TEXT);
+
+        if !plain.is_empty() {
+            let wrapped = wrap_content(&plain, body_width, comment_max_lines);
+            for wline in wrapped {
+                match wline {
+                    ContentLine::Normal(text) => {
+                        lines.push(Line::from(vec![
+                            Span::styled(body_indent.clone(), indent_style),
+                            Span::styled(text, content_style),
+                        ]));
+                    }
+                    ContentLine::Quote(text) => {
+                        lines.push(Line::from(vec![
+                            Span::styled(body_indent.clone(), indent_style),
+                            Span::styled("▎ ", theme::QUOTE_BAR),
+                            Span::styled(text, theme::QUOTE),
+                        ]));
+                    }
+                    ContentLine::Blank => {
+                        lines.push(Line::from(Span::styled(body_indent.clone(), indent_style)));
+                    }
+                }
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(""));
+        }
+
+        comment_lines.push(lines);
+    }
+
+    comment_lines
 }
 
 pub(crate) fn hn_html_to_plain(html: &str) -> String {
@@ -432,4 +417,30 @@ fn wrap_content(s: &str, width: usize, max_lines: usize) -> Vec<ContentLine> {
         out.push(ContentLine::Normal(String::new()));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hn_html_to_plain_preserves_paragraphs_breaks_and_entities() {
+        let html = "<p>Hello&nbsp;world</p><p>line<br>next &amp; more</p>";
+
+        assert_eq!(hn_html_to_plain(html), "Hello world\n\nline\nnext & more");
+    }
+
+    #[test]
+    fn hn_html_to_plain_keeps_link_text_and_strips_tags() {
+        let html = r#"Read <a href="https://example.com">this</a> &gt; that"#;
+
+        assert_eq!(hn_html_to_plain(html), "Read this > that");
+    }
+
+    #[test]
+    fn hn_html_to_plain_collapses_whitespace_and_trailing_blank_lines() {
+        let html = "<p>  alpha   beta  </p><p></p><p> gamma </p><br><br>";
+
+        assert_eq!(hn_html_to_plain(html), "alpha beta\n\ngamma");
+    }
 }

@@ -206,10 +206,10 @@ impl SummarizePlugin {
 
     pub fn handle_event(&mut self, event: PluginEvent) {
         match event {
-            PluginEvent::SummarizeStarted { model } => {
+            PluginEvent::Started { model } => {
                 self.model_name = model;
             }
-            PluginEvent::SummarizeChunk { content, reasoning } => {
+            PluginEvent::Chunk { content, reasoning } => {
                 if !reasoning.is_empty() && !self.content_started {
                     self.reasoning_buffer.push_str(&reasoning);
                     if self.state == SummarizeState::Loading {
@@ -224,10 +224,10 @@ impl SummarizePlugin {
                     }
                 }
             }
-            PluginEvent::SummarizeComplete => {
+            PluginEvent::Complete => {
                 self.state = SummarizeState::Done;
             }
-            PluginEvent::SummarizeError { message } => {
+            PluginEvent::Error { message } => {
                 self.state = SummarizeState::Error;
                 self.error = Some(message);
             }
@@ -256,10 +256,10 @@ async fn run_stream(
     .await;
     match result {
         Ok(()) => {
-            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeComplete));
+            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::Complete));
         }
         Err(e) => {
-            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeError {
+            let _ = tx.send(AppEvent::PluginEvent(PluginEvent::Error {
                 message: format!("{e:#}"),
             }));
         }
@@ -287,7 +287,7 @@ async fn stream_inner(
     }
 
     let mut stream = builder.await.context("failed to initialize stream")?;
-    let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeStarted {
+    let _ = tx.send(AppEvent::PluginEvent(PluginEvent::Started {
         model: stream.model().to_string(),
     }));
 
@@ -296,7 +296,7 @@ async fn stream_inner(
         if chunk.is_empty() {
             continue;
         }
-        let _ = tx.send(AppEvent::PluginEvent(PluginEvent::SummarizeChunk {
+        let _ = tx.send(AppEvent::PluginEvent(PluginEvent::Chunk {
             content: chunk.content,
             reasoning: chunk.reasoning,
         }));
@@ -310,8 +310,7 @@ fn build_prompt(
     max_comments: usize,
 ) -> String {
     let mut prompt = format!("# {}\n\n", story.title);
-    let mut count = 0;
-    for comment in comments {
+    for (count, comment) in comments.iter().enumerate() {
         if count >= max_comments {
             break;
         }
@@ -319,7 +318,6 @@ fn build_prompt(
         let indent = "  ".repeat(comment.depth);
         let text = hn_html_to_plain(&comment.text);
         prompt.push_str(&format!("{indent}{author}: {text}\n\n"));
-        count += 1;
     }
     prompt
 }

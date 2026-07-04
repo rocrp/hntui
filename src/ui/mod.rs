@@ -10,8 +10,8 @@ pub mod theme;
 use crate::app::{App, View};
 use crate::logging;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::widgets::Widget;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::widgets::{Block, Borders, Widget};
 use ratatui::Frame;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,7 +32,7 @@ impl Widget for Dim {
     }
 }
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &App) {
     match app.view {
         View::Stories => story_list::render(frame, app),
         View::Comments => comment_view::render(frame, app),
@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     let spinner = app.spinner_frame();
-    plugin_overlay::render(frame, &mut app.summarize_plugin, spinner);
+    plugin_overlay::render(frame, &app.summarize_plugin, spinner);
     if app.feed_filter_popup.is_some() {
         feed_filter::render(frame, app);
     }
@@ -240,6 +240,19 @@ pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
         width,
         height,
     }
+}
+
+pub(crate) fn bordered_list_footer_areas(area: Rect) -> (Rect, Rect) {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    list_footer_areas(inner)
+}
+
+pub(crate) fn list_footer_areas(inner: Rect) -> (Rect, Rect) {
+    let [list_area, footer_area] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .areas(inner);
+    (list_area, footer_area)
 }
 
 pub(crate) fn format_error(err: &str) -> String {

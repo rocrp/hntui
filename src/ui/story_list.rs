@@ -1,16 +1,16 @@
-use crate::app::{App, LayoutAreas};
+use crate::app::App;
 use crate::ui::theme;
 use crate::ui::{
     domain_from_url, domain_icon, format_age, format_error, now_unix, FALLBACK_DOMAIN_ICON,
 };
 use html_escape::decode_html_entities;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     let spinner = app.spinner_frame();
@@ -46,17 +46,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let [list_area, footer_area] = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
-        .areas(inner);
-
-    app.layout_areas = LayoutAreas {
-        list_area,
-        frame_area: area,
-    };
-    app.story_page_size = (list_area.height as usize).max(1);
-    app.maybe_prefetch_stories();
+    let (list_area, footer_area) = super::list_footer_areas(inner);
 
     fn bucket_importance(value: f64) -> f64 {
         if value >= 0.85 {
@@ -185,7 +175,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let list = List::new(items)
         .highlight_symbol("")
         .highlight_style(theme::SELECTED.add_modifier(Modifier::BOLD));
-    frame.render_stateful_widget(list, list_area, &mut app.story_list_state);
+    let mut state = app.story_list_state.clone();
+    frame.render_stateful_widget(list, list_area, &mut state);
 
     let footer_block = Block::default().borders(Borders::TOP);
     let footer_inner = footer_block.inner(footer_area);
@@ -232,7 +223,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut spans = vec![
             Span::styled(format!("{} pts", story.score), score_style),
             Span::raw(format!(" by {} ", story.by)),
-            Span::styled(format!("{age}"), theme::HINT),
+            Span::styled(age.to_string(), theme::HINT),
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];
@@ -278,4 +269,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
     let paragraph = Paragraph::new(vec![meta, help]);
     frame.render_widget(paragraph, footer_inner);
+}
+
+pub(crate) fn content_areas(area: Rect) -> (Rect, Rect) {
+    super::bordered_list_footer_areas(area)
 }

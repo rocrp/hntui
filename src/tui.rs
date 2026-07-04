@@ -41,6 +41,11 @@ impl Tui {
         self.terminal.draw(f).context("draw frame")?;
         Ok(())
     }
+
+    pub fn area(&self) -> Result<ratatui::layout::Rect> {
+        let size = self.terminal.size().context("read terminal size")?;
+        Ok(ratatui::layout::Rect::new(0, 0, size.width, size.height))
+    }
 }
 
 impl Drop for Tui {
