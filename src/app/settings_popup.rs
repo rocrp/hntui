@@ -44,6 +44,7 @@ pub struct SettingsPopup {
     pub base_url: String,
     pub max_comments: String,
     pub system_prompt: String,
+    pub dirty: bool,
     pub saved_at: Option<Instant>,
 }
 
@@ -62,6 +63,7 @@ impl SettingsPopup {
                 base_url: c.base_url.clone().unwrap_or_default(),
                 max_comments: c.max_comments.to_string(),
                 system_prompt: c.system_prompt.clone(),
+                dirty: false,
                 saved_at: None,
             },
             None => Self {
@@ -74,6 +76,7 @@ impl SettingsPopup {
                 base_url: String::new(),
                 max_comments: "200".to_string(),
                 system_prompt: String::new(),
+                dirty: false,
                 saved_at: None,
             },
         }
@@ -115,10 +118,20 @@ impl SettingsPopup {
 
     pub fn confirm_edit(&mut self) {
         let val = self.edit_buffer.clone();
-        *self.field_mut(self.selected_field()) = val;
+        let field = self.selected_field();
+        if self.field_value(field) != val {
+            *self.field_mut(field) = val;
+            self.dirty = true;
+            self.saved_at = None;
+        }
         self.editing = false;
         self.edit_buffer.clear();
         self.edit_cursor = 0;
+    }
+
+    pub(crate) fn mark_saved(&mut self) {
+        self.dirty = false;
+        self.saved_at = Some(Instant::now());
     }
 
     pub fn cancel_edit(&mut self) {
@@ -200,6 +213,20 @@ mod tests {
         assert_eq!(popup.model, "openai/gpt-4o-mini");
         assert!(!popup.editing);
         assert!(popup.edit_buffer.is_empty());
+        assert!(popup.dirty);
+    }
+
+    #[test]
+    fn unchanged_edit_does_not_mark_dirty() {
+        let mut popup = SettingsPopup::from_config(&None);
+        popup.model = "gemini/gemini-flash-lite-latest".to_string();
+        popup.cursor = 0;
+        popup.start_editing();
+
+        popup.confirm_edit();
+
+        assert_eq!(popup.model, "gemini/gemini-flash-lite-latest");
+        assert!(!popup.dirty);
     }
 
     #[test]

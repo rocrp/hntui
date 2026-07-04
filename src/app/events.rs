@@ -190,7 +190,7 @@ impl App {
             }
             AppEvent::SettingsSaved => {
                 if let Some(popup) = self.settings_popup.as_mut() {
-                    popup.saved_at = Some(std::time::Instant::now());
+                    popup.mark_saved();
                 }
                 self.last_error = None;
             }

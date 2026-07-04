@@ -1,7 +1,6 @@
 use super::{App, AppEvent, SettingsPopup};
 use crate::api::FeedKind;
 use crate::plugin::config::{PluginConfig, SummarizeConfig};
-use std::time::Instant;
 
 impl App {
     pub(super) fn handle_feed_filter_key(&mut self, key: crossterm::event::KeyEvent) {
@@ -151,6 +150,9 @@ impl App {
         let Some(popup) = self.settings_popup.as_ref() else {
             return;
         };
+        if !popup.dirty {
+            return;
+        }
 
         let model = popup.model.trim();
         if model.is_empty() {
@@ -225,7 +227,7 @@ impl App {
                 let _ = tx.send(event);
             });
         } else if let Some(popup) = self.settings_popup.as_mut() {
-            popup.saved_at = Some(Instant::now());
+            popup.mark_saved();
         }
     }
 }
