@@ -1,10 +1,13 @@
 mod api;
 mod app;
 mod browser;
+mod config;
 mod input;
 mod logging;
-mod plugin;
 mod state;
+mod summarizer;
+mod tasks;
+mod text;
 mod tui;
 mod ui;
 
@@ -56,7 +59,7 @@ pub struct Cli {
     #[arg(long)]
     pub base_url: Option<String>,
 
-    /// Plugin config file path (optional; will search defaults).
+    /// Config file path (legacy flag name; will search defaults when omitted).
     #[arg(long)]
     pub plugin_config: Option<PathBuf>,
 
@@ -113,38 +116,6 @@ impl Cli {
     }
 }
 
-fn config_candidates(cli_override: Option<&PathBuf>, filename: &str) -> Vec<PathBuf> {
-    if let Some(path) = cli_override {
-        return vec![path.clone()];
-    }
-
-    let mut candidates = Vec::new();
-    let mut push = |p: PathBuf| {
-        if !candidates.contains(&p) {
-            candidates.push(p);
-        }
-    };
-
-    push(PathBuf::from(filename));
-
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            push(exe_dir.join(filename));
-        }
-    }
-
-    if let Some(proj) = directories::ProjectDirs::from("dev", "hntui", "hntui") {
-        push(proj.config_dir().join(filename));
-    }
-
-    // Also search ~/.config/hntui/ (XDG-style)
-    if let Some(home) = dirs_home() {
-        push(home.join(".config").join("hntui").join(filename));
-    }
-
-    candidates
-}
-
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -168,29 +139,6 @@ fn load_env_file(explicit: Option<&std::path::Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn plugin_config_candidates(cli: &Cli) -> Vec<PathBuf> {
-    if cli.plugin_config.is_some() {
-        return config_candidates(cli.plugin_config.as_ref(), "plugin-config.toml");
-    }
-    let mut candidates = config_candidates(None, "config.toml");
-    candidates.extend(config_candidates(None, "plugin-config.toml"));
-    candidates
-}
-
-/// Resolve path to write config to: CLI override → first existing candidate → default XDG path.
-fn resolve_config_save_path(cli: &Cli) -> Option<PathBuf> {
-    if let Some(path) = &cli.plugin_config {
-        return Some(path.clone());
-    }
-    let candidates = config_candidates(None, "config.toml");
-    for c in &candidates {
-        if c.exists() {
-            return Some(c.clone());
-        }
-    }
-    plugin::config::default_config_path()
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -199,10 +147,7 @@ async fn main() -> anyhow::Result<()> {
     logging::init(cli.log_file.clone()).context("init logging")?;
     logging::init_log_bridge();
 
-    let plugin_candidates = plugin_config_candidates(&cli);
-    let plugin_config = plugin::config::load_plugin_config(&plugin_candidates)
-        .with_context(|| "load plugin config")?;
-    let config_path = resolve_config_save_path(&cli);
+    let config = config::Config::load(cli.plugin_config.as_deref()).context("load config")?;
 
-    app::run(cli, plugin_config, config_path).await
+    app::run(cli, config).await
 }

@@ -42,6 +42,7 @@ const STALE_ITEM_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
 impl HnClient {
     pub fn new(
+        http: Client,
         base_url: String,
         backend: ApiBackend,
         cache_size: usize,
@@ -60,11 +61,7 @@ impl HnClient {
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             backend,
-            http: Client::builder()
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(Duration::from_secs(30))
-                .build()
-                .context("build http client")?,
+            http,
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
             file_cache,
             concurrency,
@@ -92,7 +89,7 @@ impl HnClient {
         let Some(file_cache) = self.file_cache.clone() else {
             return;
         };
-        tokio::spawn(async move {
+        crate::tasks::spawn_detached(async move {
             match file_cache.cleanup_expired(max_age).await {
                 Ok(removed) => {
                     if removed > 0 {
@@ -421,7 +418,7 @@ impl HnClient {
     fn spawn_revalidate_item(&self, id: u64) {
         let client = self.clone();
         let semaphore = self.revalidate_semaphore.clone();
-        tokio::spawn(async move {
+        crate::tasks::spawn_detached(async move {
             let _permit = match semaphore.try_acquire_owned() {
                 Ok(permit) => permit,
                 Err(_) => return,

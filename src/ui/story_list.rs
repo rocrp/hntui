@@ -33,9 +33,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         format!("{feed_label} (loading {spinner})")
     } else if app.story_loading {
         format!("{feed_label} (refreshing {spinner})")
-    } else if app.prefetch_in_flight && app.has_comment_prefetch_in_flight() {
+    } else if app.is_story_prefetch_in_flight() && app.has_comment_prefetch_in_flight() {
         format!("{feed_label} (prefetching + comments {spinner}){filter_suffix}")
-    } else if app.prefetch_in_flight {
+    } else if app.is_story_prefetch_in_flight() {
         format!("{feed_label} (prefetching {spinner}){filter_suffix}")
     } else if app.has_comment_prefetch_in_flight() {
         format!("{feed_label} (preloading comments {spinner}){filter_suffix}")
@@ -227,7 +227,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Span::raw(" | "),
             Span::styled(format!("{} comments", story.comment_count), comment_style),
         ];
-        if app.prefetch_in_flight {
+        if app.is_story_prefetch_in_flight() {
             spans.push(Span::raw(" | "));
             spans.push(Span::styled(
                 "loading more…",

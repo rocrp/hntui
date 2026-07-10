@@ -1,5 +1,5 @@
 use super::{
-    App, AppEvent, InFlightPrefetch, LoadTarget, StoriesLoadMode, View, IDLE_PREFETCH_DELAY,
+    App, AppEvent, CommentLoadKind, StoriesLoadMode, TaskTarget, View, IDLE_PREFETCH_DELAY,
     MAX_COMMENT_PREFETCH_IN_FLIGHT, PREFETCH_LOOKAHEAD,
 };
 use crate::api::types::{CommentNode, Story};
@@ -16,7 +16,7 @@ impl App {
         if self.search_active {
             return;
         }
-        if self.story_loading || self.prefetch_in_flight || !self.has_more_stories {
+        if self.story_loading || self.is_story_prefetch_in_flight() || !self.has_more_stories {
             return;
         }
         if self.stories.is_empty() {
@@ -32,22 +32,19 @@ impl App {
             return;
         }
 
-        self.prefetch_in_flight = true;
-        let generation = self.stories_generation;
-        let client = self.client.clone();
+        let source = self.sources.stories.clone();
         let story_ids = self.story_ids.clone();
         let page_size = self.cli.page_size;
         let feed = self.current_feed;
-        self.spawn_load_detached(
-            LoadTarget::Stories,
-            generation,
+        self.tasks.spawn(
+            TaskTarget::Stories,
             async move {
-                client
-                    .fetch_more_stories(feed, &story_ids, loaded, page_size)
+                source
+                    .more_stories(feed, story_ids, loaded, page_size)
                     .await
             },
-            move |stories| AppEvent::StoriesLoaded {
-                generation,
+            move |task, stories| AppEvent::StoriesLoaded {
+                task,
                 mode: StoriesLoadMode::Append,
                 story_ids: None,
                 stories,
@@ -60,6 +57,9 @@ impl App {
             return;
         }
         if self.story_loading {
+            return;
+        }
+        if self.comment_loading {
             return;
         }
         if !self.is_idle_for_prefetch() {
@@ -75,15 +75,17 @@ impl App {
             .collect();
 
         let to_cancel: Vec<u64> = self
-            .comment_prefetch_in_flight
-            .keys()
-            .copied()
+            .tasks
+            .targets_where(|target| matches!(target, TaskTarget::CommentRoots(_)))
+            .into_iter()
+            .filter_map(|target| match target {
+                TaskTarget::CommentRoots(story_id) => Some(story_id),
+                _ => None,
+            })
             .filter(|id| !top_ids.contains(id))
-            .filter(|id| self.awaiting_prefetch_story_id != Some(*id))
             .collect();
         for story_id in &to_cancel {
-            if let Some(inflight) = self.comment_prefetch_in_flight.remove(story_id) {
-                inflight.handle.abort();
+            if self.tasks.cancel(TaskTarget::CommentRoots(*story_id)) {
                 logging::log_info(format!("cancelled prefetch story_id={story_id}"));
             }
         }
@@ -94,12 +96,16 @@ impl App {
             .max_cached_distance_when_full(&self.stories, selected);
 
         for candidate in candidates {
-            if self.comment_prefetch_in_flight.len() >= MAX_COMMENT_PREFETCH_IN_FLIGHT {
+            if self
+                .tasks
+                .count_where(|target| matches!(target, TaskTarget::CommentRoots(_)))
+                >= MAX_COMMENT_PREFETCH_IN_FLIGHT
+            {
                 break;
             }
             if self
-                .comment_prefetch_in_flight
-                .contains_key(&candidate.story.id)
+                .tasks
+                .is_running(TaskTarget::CommentRoots(candidate.story.id))
             {
                 continue;
             }
@@ -119,11 +125,17 @@ impl App {
     }
 
     pub fn is_comment_prefetching_for_story(&self, story_id: u64) -> bool {
-        self.comment_prefetch_in_flight.contains_key(&story_id)
+        self.tasks.is_running(TaskTarget::CommentRoots(story_id))
     }
 
     pub fn has_comment_prefetch_in_flight(&self) -> bool {
-        !self.comment_prefetch_in_flight.is_empty()
+        self.tasks
+            .count_where(|target| matches!(target, TaskTarget::CommentRoots(_)))
+            > 0
+    }
+
+    pub fn is_story_prefetch_in_flight(&self) -> bool {
+        !self.story_loading && self.tasks.is_running(TaskTarget::Stories)
     }
 
     fn is_idle_for_prefetch(&self) -> bool {
@@ -175,26 +187,17 @@ impl App {
     }
 
     fn start_comment_prefetch(&mut self, story: Story) {
-        let generation = self.comments_prefetch_generation.advance();
-
         let story_id = story.id;
-        let client = self.client.clone();
-        let handle = self.spawn_fetch(
-            async move { client.fetch_comment_roots(&story).await },
-            move |comments| AppEvent::CommentsPrefetched {
-                generation,
-                story_id,
+        let source = self.sources.stories.clone();
+        self.tasks.spawn(
+            TaskTarget::CommentRoots(story_id),
+            async move { source.comment_roots(story).await },
+            move |task, comments| AppEvent::CommentsLoaded {
+                task,
+                kind: CommentLoadKind::Prefetch,
                 comments,
             },
-            move |message| AppEvent::PrefetchError {
-                generation,
-                story_id,
-                message,
-            },
         );
-
-        self.comment_prefetch_in_flight
-            .insert(story_id, InFlightPrefetch { generation, handle });
     }
 }
 

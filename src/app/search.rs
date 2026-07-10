@@ -1,4 +1,4 @@
-use super::{App, AppEvent, LoadTarget};
+use super::{App, AppEvent, TaskTarget};
 use crate::api::Story;
 
 pub(super) struct SavedStories {
@@ -32,17 +32,14 @@ impl App {
         self.search_active = true;
         self.story_loading = true;
         self.last_error = None;
-        let generation = self.search_generation.advance();
+        self.tasks.cancel(TaskTarget::Stories);
+        self.cancel_comment_root_tasks();
 
-        let client = self.search_client.clone();
-        self.spawn_load_detached(
-            LoadTarget::Search,
-            generation,
-            async move { client.search_stories(&query, 0).await },
-            move |(stories, _has_more)| AppEvent::SearchResultsLoaded {
-                generation,
-                stories,
-            },
+        let source = self.sources.search.clone();
+        self.tasks.spawn(
+            TaskTarget::Search,
+            async move { source.search(query).await },
+            move |task, stories| AppEvent::SearchResultsLoaded { task, stories },
         );
     }
 
@@ -52,8 +49,10 @@ impl App {
     }
 
     pub(super) fn exit_search_mode(&mut self) {
+        self.tasks.cancel(TaskTarget::Search);
         self.search_active = false;
         self.search_input_active = false;
+        self.story_loading = false;
         self.search_query.clear();
 
         if let Some(saved) = self.saved_stories.take() {

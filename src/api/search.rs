@@ -1,15 +1,12 @@
 use crate::api::types::Story;
 use crate::logging;
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct AlgoliaResponse {
     hits: Vec<AlgoliaHit>,
-    #[serde(rename = "nbPages")]
-    nb_pages: u64,
-    page: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,28 +50,23 @@ impl AlgoliaHit {
 #[derive(Clone)]
 pub struct SearchClient {
     http: Client,
+    endpoint: Url,
 }
 
 impl SearchClient {
-    pub fn new(http: Client) -> Self {
-        Self { http }
+    pub fn new(http: Client, endpoint: &str) -> Result<Self> {
+        let endpoint = Url::parse(endpoint).context("parse Algolia endpoint")?;
+        Ok(Self { http, endpoint })
     }
 
     /// Search stories via Algolia HN Search API.
-    /// Returns `(stories, has_more_pages)`.
-    pub async fn search_stories(&self, query: &str, page: u32) -> Result<(Vec<Story>, bool)> {
-        let url = "https://hn.algolia.com/api/v1/search";
-        logging::log_info(format!("algolia: searching query={query:?} page={page}"));
+    pub async fn search_stories(&self, query: &str) -> Result<Vec<Story>> {
+        logging::log_info(format!("algolia: searching query={query:?}"));
 
         let resp: AlgoliaResponse = self
             .http
-            .get(url)
-            .query(&[
-                ("query", query),
-                ("tags", "story"),
-                ("hitsPerPage", "30"),
-                ("page", &page.to_string()),
-            ])
+            .get(self.endpoint.clone())
+            .query(&[("query", query), ("tags", "story"), ("hitsPerPage", "30")])
             .send()
             .await
             .context("fetch algolia search")?
@@ -84,7 +76,6 @@ impl SearchClient {
             .await
             .context("decode algolia search")?;
 
-        let has_more = resp.page + 1 < resp.nb_pages;
         let mut stories = Vec::new();
         for hit in resp.hits {
             if let Some(story) = hit.into_story()? {
@@ -92,6 +83,6 @@ impl SearchClient {
             }
         }
 
-        Ok((stories, has_more))
+        Ok(stories)
     }
 }

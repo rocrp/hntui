@@ -1,148 +1,221 @@
 use super::{App, AppEvent, SettingsPopup};
 use crate::api::FeedKind;
-use crate::plugin::config::{PluginConfig, SummarizeConfig};
+use crate::app::TaskTarget;
+use crate::config::{default_system_prompt, ConfigEdits, SummarizeConfig};
+use crate::input::{step_bounded, CursorStep, FeedFilterAction, SettingsAction, TextAction};
 
 impl App {
-    pub(super) fn handle_feed_filter_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::KeyCode;
-
-        let Some(popup) = self.feed_filter_popup.as_mut() else {
-            return;
-        };
-
-        match key.code {
-            KeyCode::Esc => {
-                self.feed_filter_popup = None;
+    pub(super) fn handle_feed_filter_action(&mut self, action: FeedFilterAction) {
+        let popup = self
+            .feed_filter_popup
+            .as_mut()
+            .expect("feed-filter action without popup");
+        match action {
+            FeedFilterAction::Dismiss => self.feed_filter_popup = None,
+            FeedFilterAction::MoveDown => {
+                step_bounded(
+                    &mut popup.feed_cursor,
+                    CursorStep::Next,
+                    FeedKind::ALL.len(),
+                );
             }
-            KeyCode::Enter => {
-                let selected_feed = FeedKind::ALL[popup.feed_cursor];
-                let feed_changed = selected_feed != self.current_feed;
-                self.feed_filter_popup = None;
-
-                if feed_changed {
-                    if self.search_active {
-                        self.exit_search_mode();
-                    }
-                    self.current_feed = selected_feed;
-                    self.refresh_stories();
-                    self.recompute_visible_stories();
-                }
+            FeedFilterAction::MoveUp => {
+                step_bounded(
+                    &mut popup.feed_cursor,
+                    CursorStep::Previous,
+                    FeedKind::ALL.len(),
+                );
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if popup.feed_cursor + 1 < FeedKind::ALL.len() {
-                    popup.feed_cursor += 1;
-                }
+            FeedFilterAction::Select => {
+                let selected = FeedKind::ALL[popup.feed_cursor];
+                self.select_feed(selected);
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                popup.feed_cursor = popup.feed_cursor.saturating_sub(1);
+            FeedFilterAction::SelectIndex(index) => {
+                let selected = *FeedKind::ALL
+                    .get(index)
+                    .unwrap_or_else(|| panic!("feed index out of range: {index}"));
+                self.select_feed(selected);
             }
-            _ => {}
         }
     }
 
-    pub(super) fn handle_settings_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::{KeyCode, KeyModifiers};
-
-        let Some(popup) = self.settings_popup.as_mut() else {
-            return;
-        };
-
-        if popup.editing {
-            let mods = key.modifiers;
-            let ctrl = mods.contains(KeyModifiers::CONTROL);
-            let alt = mods.contains(KeyModifiers::ALT);
-
-            match key.code {
-                KeyCode::Enter => {
-                    popup.confirm_edit();
-                    self.save_settings();
-                }
-                KeyCode::Esc => popup.cancel_edit(),
-                KeyCode::Left if alt => {
-                    popup.edit_cursor = popup.prev_word_boundary();
-                }
-                KeyCode::Left => {
-                    popup.edit_cursor = popup.edit_cursor.saturating_sub(1);
-                }
-                KeyCode::Right if alt => {
-                    popup.edit_cursor = popup.next_word_boundary();
-                }
-                KeyCode::Right => {
-                    let len = popup.edit_buffer.chars().count();
-                    if popup.edit_cursor < len {
-                        popup.edit_cursor += 1;
-                    }
-                }
-                KeyCode::Home => popup.edit_cursor = 0,
-                KeyCode::End => popup.edit_cursor = popup.edit_buffer.chars().count(),
-                KeyCode::Char('a') if ctrl => popup.edit_cursor = 0,
-                KeyCode::Char('e') if ctrl => {
-                    popup.edit_cursor = popup.edit_buffer.chars().count();
-                }
-                KeyCode::Backspace if ctrl || alt => {
-                    popup.delete_word_backward();
-                }
-                KeyCode::Backspace => {
-                    if popup.edit_cursor > 0 {
-                        let byte = popup.cursor_byte_offset();
-                        let prev_byte = popup.edit_buffer[..byte]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        popup.edit_buffer.replace_range(prev_byte..byte, "");
-                        popup.edit_cursor -= 1;
-                    }
-                }
-                KeyCode::Delete => {
-                    let len = popup.edit_buffer.chars().count();
-                    if popup.edit_cursor < len {
-                        let byte = popup.cursor_byte_offset();
-                        let next_byte = popup.edit_buffer[byte..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| byte + i)
-                            .unwrap_or(popup.edit_buffer.len());
-                        popup.edit_buffer.replace_range(byte..next_byte, "");
-                    }
-                }
-                KeyCode::Char('w') if ctrl => {
-                    popup.delete_word_backward();
-                }
-                KeyCode::Char('u') if ctrl => {
-                    let byte = popup.cursor_byte_offset();
-                    popup.edit_buffer.replace_range(..byte, "");
-                    popup.edit_cursor = 0;
-                }
-                KeyCode::Char('k') if ctrl => {
-                    let byte = popup.cursor_byte_offset();
-                    popup.edit_buffer.truncate(byte);
-                }
-                KeyCode::Char(c) if !ctrl && !alt => {
-                    let byte = popup.cursor_byte_offset();
-                    popup.edit_buffer.insert(byte, c);
-                    popup.edit_cursor += 1;
-                }
-                _ => {}
-            }
+    fn select_feed(&mut self, selected: FeedKind) {
+        let changed = selected != self.current_feed;
+        self.feed_filter_popup = None;
+        if !changed {
             return;
         }
+        if self.search_active {
+            self.exit_search_mode();
+        }
+        self.current_feed = selected;
+        self.refresh_stories();
+        self.recompute_visible_stories();
+    }
 
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
-                if popup.cursor + 1 < SettingsPopup::FIELD_COUNT {
-                    popup.cursor += 1;
-                }
-            }
-            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
-                popup.cursor = popup.cursor.saturating_sub(1);
-            }
-            (KeyCode::Enter, _) => popup.start_editing(),
-            (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+    pub(super) fn handle_settings_action(&mut self, action: SettingsAction) {
+        match action {
+            SettingsAction::CloseAndSave => {
                 self.save_settings();
                 self.settings_popup = None;
             }
-            _ => {}
+            SettingsAction::MoveDown => {
+                let popup = self
+                    .settings_popup
+                    .as_mut()
+                    .expect("settings action without popup");
+                step_bounded(
+                    &mut popup.cursor,
+                    CursorStep::Next,
+                    SettingsPopup::FIELD_COUNT,
+                );
+            }
+            SettingsAction::MoveUp => {
+                let popup = self
+                    .settings_popup
+                    .as_mut()
+                    .expect("settings action without popup");
+                step_bounded(
+                    &mut popup.cursor,
+                    CursorStep::Previous,
+                    SettingsPopup::FIELD_COUNT,
+                );
+            }
+            SettingsAction::StartEditing => self
+                .settings_popup
+                .as_mut()
+                .expect("settings action without popup")
+                .start_editing(),
+            SettingsAction::Edit(action) => self.handle_settings_text_action(action),
+        }
+    }
+
+    fn handle_settings_text_action(&mut self, action: TextAction) {
+        let save = {
+            let popup = self
+                .settings_popup
+                .as_mut()
+                .expect("settings text action without popup");
+            assert!(popup.editing, "settings text action outside editor");
+            match action {
+                TextAction::Submit => {
+                    popup.confirm_edit();
+                    true
+                }
+                TextAction::Cancel => {
+                    popup.cancel_edit();
+                    false
+                }
+                TextAction::MoveWordLeft => {
+                    popup.edit_cursor = popup.prev_word_boundary();
+                    false
+                }
+                TextAction::MoveLeft => {
+                    popup.edit_cursor = popup.edit_cursor.saturating_sub(1);
+                    false
+                }
+                TextAction::MoveWordRight => {
+                    popup.edit_cursor = popup.next_word_boundary();
+                    false
+                }
+                TextAction::MoveRight => {
+                    let length = popup.edit_buffer.chars().count();
+                    popup.edit_cursor = (popup.edit_cursor + 1).min(length);
+                    false
+                }
+                TextAction::MoveToStart => {
+                    popup.edit_cursor = 0;
+                    false
+                }
+                TextAction::MoveToEnd => {
+                    popup.edit_cursor = popup.edit_buffer.chars().count();
+                    false
+                }
+                TextAction::DeleteWordBackward => {
+                    popup.delete_word_backward();
+                    false
+                }
+                TextAction::DeleteBackward => {
+                    if popup.edit_cursor > 0 {
+                        let byte = popup.cursor_byte_offset();
+                        let previous = popup.edit_buffer[..byte]
+                            .char_indices()
+                            .next_back()
+                            .map(|(index, _)| index)
+                            .unwrap_or(0);
+                        popup.edit_buffer.replace_range(previous..byte, "");
+                        popup.edit_cursor -= 1;
+                    }
+                    false
+                }
+                TextAction::DeleteForward => {
+                    let length = popup.edit_buffer.chars().count();
+                    if popup.edit_cursor < length {
+                        let byte = popup.cursor_byte_offset();
+                        let next = popup.edit_buffer[byte..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(index, _)| byte + index)
+                            .unwrap_or(popup.edit_buffer.len());
+                        popup.edit_buffer.replace_range(byte..next, "");
+                    }
+                    false
+                }
+                TextAction::DeleteToStart => {
+                    let byte = popup.cursor_byte_offset();
+                    popup.edit_buffer.replace_range(..byte, "");
+                    popup.edit_cursor = 0;
+                    false
+                }
+                TextAction::DeleteToEnd => {
+                    let byte = popup.cursor_byte_offset();
+                    popup.edit_buffer.truncate(byte);
+                    false
+                }
+                TextAction::Insert(character) => {
+                    let byte = popup.cursor_byte_offset();
+                    popup.edit_buffer.insert(byte, character);
+                    popup.edit_cursor += 1;
+                    false
+                }
+            }
+        };
+        if save {
+            self.save_settings();
+        }
+    }
+
+    pub(super) fn handle_filter_input_action(&mut self, action: TextAction) {
+        assert!(self.filter_input_active, "filter action outside text input");
+        match action {
+            TextAction::Submit => self.filter_input_active = false,
+            TextAction::Cancel => {
+                self.keyword_filter.clear();
+                self.filter_input_active = false;
+                self.recompute_visible_stories();
+            }
+            TextAction::DeleteBackward => {
+                self.keyword_filter.pop();
+                self.recompute_visible_stories();
+            }
+            TextAction::Insert(character) => {
+                self.keyword_filter.push(character);
+                self.recompute_visible_stories();
+            }
+            _ => unreachable!("unsupported filter text action: {action:?}"),
+        }
+    }
+
+    pub(super) fn handle_search_input_action(&mut self, action: TextAction) {
+        assert!(self.search_input_active, "search action outside text input");
+        match action {
+            TextAction::Submit => self.submit_search(),
+            TextAction::Cancel => self.cancel_search(),
+            TextAction::DeleteBackward => {
+                self.search_query.pop();
+            }
+            TextAction::Insert(character) => self.search_query.push(character),
+            _ => unreachable!("unsupported search text action: {action:?}"),
         }
     }
 
@@ -160,42 +233,24 @@ impl App {
             return;
         }
         let max_comments = match popup.max_comments.trim().parse::<usize>() {
-            Ok(n) if n > 0 => n,
+            Ok(number) if number > 0 => number,
             Ok(_) => {
                 self.last_error = Some("settings: max comments must be > 0".to_string());
                 return;
             }
-            Err(err) => {
-                self.last_error = Some(format!("settings: invalid max comments: {err}"));
+            Err(error) => {
+                self.last_error = Some(format!("settings: invalid max comments: {error}"));
                 return;
             }
         };
         let system_prompt = if popup.system_prompt.trim().is_empty() {
-            "Summarize this Hacker News discussion concisely. \
-             Highlight key arguments, disagreements, and consensus points."
-                .to_string()
+            default_system_prompt()
         } else {
             popup.system_prompt.clone()
         };
-
-        let api_key = {
-            let trimmed = popup.api_key.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        };
-        let base_url = {
-            let trimmed = popup.base_url.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        };
-
-        let config = SummarizeConfig {
+        let api_key = nonempty_owned(&popup.api_key);
+        let base_url = nonempty_owned(&popup.base_url);
+        let summarize = SummarizeConfig {
             model: model.to_string(),
             api_key,
             base_url,
@@ -203,31 +258,16 @@ impl App {
             system_prompt,
         };
 
-        self.summarize_plugin.update_config(Some(config.clone()));
-
-        let path = self
-            .config_path
-            .clone()
-            .or_else(crate::plugin::config::default_config_path);
-        if let Some(path) = path {
-            let tx = self.tx.clone();
-            let plugin_config = PluginConfig {
-                summarize: Some(config),
-            };
-            tokio::spawn(async move {
-                let event = if let Err(err) =
-                    crate::plugin::config::save_plugin_config(&path, &plugin_config).await
-                {
-                    AppEvent::SettingsSaveError {
-                        message: format!("{err:#}"),
-                    }
-                } else {
-                    AppEvent::SettingsSaved
-                };
-                let _ = tx.send(event);
-            });
-        } else if let Some(popup) = self.settings_popup.as_mut() {
-            popup.mark_saved();
-        }
+        let current = self.config.clone();
+        self.tasks.spawn(
+            TaskTarget::SettingsSave,
+            async move { current.save(ConfigEdits { summarize }).await },
+            |task, config| AppEvent::SettingsSaved { task, config },
+        );
     }
+}
+
+fn nonempty_owned(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }

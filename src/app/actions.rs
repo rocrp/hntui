@@ -1,52 +1,88 @@
 use super::list_nav::{move_selection_down, move_selection_up, page_down, page_up};
-use super::{App, FeedFilterPopup, SettingsPopup, View};
+use super::{App, FeedFilterPopup, SettingsPopup, TaskTarget, View};
 use crate::api::FeedKind;
-use crate::input::Action;
+use crate::input::{Action, HelpAction, InputLayer, SummaryAction};
+use anyhow::Context;
 use crossterm::event::KeyEventKind;
 use std::time::Instant;
 
 impl App {
-    pub fn handle_action(&mut self, action: Action) {
-        if action == Action::ToggleHelp {
-            self.help_visible = !self.help_visible;
-            return;
-        }
+    pub(crate) fn input_layer(&self) -> InputLayer {
         if self.help_visible {
-            if action == Action::BackOrQuit {
-                self.help_visible = false;
+            InputLayer::Help
+        } else if self.summary_overlay.is_visible() {
+            InputLayer::Summary
+        } else if let Some(settings) = &self.settings_popup {
+            if settings.editing {
+                InputLayer::SettingsEditor
+            } else {
+                InputLayer::Settings
             }
-            return;
+        } else if self.feed_filter_popup.is_some() {
+            InputLayer::FeedFilter
+        } else if self.filter_input_active {
+            InputLayer::FilterText
+        } else if self.search_input_active {
+            InputLayer::SearchText
+        } else {
+            InputLayer::View
         }
-        if self.summarize_plugin.is_overlay_visible() {
-            match action {
-                Action::BackOrQuit => self.summarize_plugin.dismiss(),
-                Action::MoveDown => self.summarize_plugin.scroll_down(1),
-                Action::MoveUp => self.summarize_plugin.scroll_up(1),
-                Action::PageDown => {
-                    let amount = self
-                        .summarize_plugin
-                        .content_height
-                        .saturating_sub(2)
-                        .max(1);
-                    self.summarize_plugin.scroll_down(amount);
-                }
-                Action::PageUp => {
-                    let amount = self
-                        .summarize_plugin
-                        .content_height
-                        .saturating_sub(2)
-                        .max(1);
-                    self.summarize_plugin.scroll_up(amount);
-                }
-                Action::ToggleCollapse => {
-                    self.summarize_plugin.copy_summary();
-                }
-                _ => {}
+    }
+
+    pub fn handle_action(&mut self, action: Action) {
+        self.last_user_activity = Instant::now();
+        match action {
+            Action::Noop => return,
+            Action::Help(HelpAction::Dismiss) => {
+                self.help_visible = false;
+                return;
             }
-            return;
+            Action::Summary(action) => {
+                match action {
+                    SummaryAction::Dismiss => {
+                        self.tasks.cancel(TaskTarget::Summary);
+                        self.summary_overlay.dismiss();
+                    }
+                    SummaryAction::ScrollDown(amount) => self.summary_overlay.scroll_down(amount),
+                    SummaryAction::ScrollUp(amount) => self.summary_overlay.scroll_up(amount),
+                    SummaryAction::PageDown => {
+                        let amount = self.summary_overlay.page_scroll_amount();
+                        self.summary_overlay.scroll_down(amount);
+                    }
+                    SummaryAction::PageUp => {
+                        let amount = self.summary_overlay.page_scroll_amount();
+                        self.summary_overlay.scroll_up(amount);
+                    }
+                    SummaryAction::Copy => {
+                        if let Err(error) = self.summary_overlay.copy_summary() {
+                            self.last_error = Some(format!("clipboard: {error:#}"));
+                        }
+                    }
+                    SummaryAction::OpenHelp => self.help_visible = true,
+                }
+                return;
+            }
+            Action::FeedFilter(action) => {
+                self.handle_feed_filter_action(action);
+                return;
+            }
+            Action::Settings(action) => {
+                self.handle_settings_action(action);
+                return;
+            }
+            Action::FilterInput(action) => {
+                self.handle_filter_input_action(action);
+                return;
+            }
+            Action::SearchInput(action) => {
+                self.handle_search_input_action(action);
+                return;
+            }
+            _ => {}
         }
 
         match (self.view, action) {
+            (_, Action::OpenHelp) => self.help_visible = true,
             (View::Stories, Action::BackOrQuit) if self.search_active => {
                 self.exit_search_mode();
             }
@@ -80,50 +116,45 @@ impl App {
             (View::Stories, Action::Enter) => self.open_comments_for_selected_story(),
             (View::Stories, Action::OpenComments) => self.open_comments_for_selected_story(),
             (View::Stories, Action::Expand) => self.open_comments_for_selected_story(),
-            (View::Stories, Action::OpenPrimaryBrowser) => {
-                let seen_id = self.selected_story().map(|s| s.id);
-                match self.open_selected_story_in_browser() {
-                    Ok(outcome) => {
-                        if let crate::browser::OpenOutcome::CopiedToClipboard = outcome {
-                            self.copied_flash = Some(Instant::now());
-                        }
-                        if let Some(id) = seen_id {
-                            self.mark_story_seen(id);
-                        }
-                    }
-                    Err(err) => self.last_error = Some(format!("{err:#}")),
-                }
-            }
-            (View::Stories, Action::OpenSecondaryBrowser) => {
-                let seen_id = self.selected_story().map(|s| s.id);
-                match self.open_selected_story_comments_in_browser() {
-                    Ok(outcome) => {
-                        if let crate::browser::OpenOutcome::CopiedToClipboard = outcome {
-                            self.copied_flash = Some(Instant::now());
-                        }
-                        if let Some(id) = seen_id {
-                            self.mark_story_seen(id);
-                        }
-                    }
-                    Err(err) => self.last_error = Some(format!("{err:#}")),
-                }
-            }
-            (View::Comments, Action::OpenPrimaryBrowser) => {
-                match self.open_current_story_comments_in_browser() {
+            (view, action @ (Action::OpenPrimaryBrowser | Action::OpenSecondaryBrowser)) => {
+                let story = match view {
+                    View::Stories => self.selected_story().cloned(),
+                    View::Comments => self.current_story.clone(),
+                };
+                let result = story
+                    .as_ref()
+                    .context(match view {
+                        View::Stories => "no selected story",
+                        View::Comments => "no current story",
+                    })
+                    .and_then(|story| {
+                        let open_source = matches!(
+                            (view, action),
+                            (View::Stories, Action::OpenPrimaryBrowser)
+                                | (View::Comments, Action::OpenSecondaryBrowser)
+                        );
+                        let hn_url =
+                            || format!("https://news.ycombinator.com/item?id={}", story.id);
+                        let url = if open_source {
+                            story.url.clone().unwrap_or_else(hn_url)
+                        } else {
+                            hn_url()
+                        };
+                        crate::browser::open_url(&url)
+                    });
+                let opened = match result {
                     Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
                         self.copied_flash = Some(Instant::now());
+                        true
                     }
-                    Ok(crate::browser::OpenOutcome::Launched) => {}
-                    Err(err) => self.last_error = Some(format!("{err:#}")),
-                }
-            }
-            (View::Comments, Action::OpenSecondaryBrowser) => {
-                match self.open_current_story_in_browser() {
-                    Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
-                        self.copied_flash = Some(Instant::now());
+                    Ok(crate::browser::OpenOutcome::Launched) => true,
+                    Err(error) => {
+                        self.last_error = Some(format!("{error:#}"));
+                        false
                     }
-                    Ok(crate::browser::OpenOutcome::Launched) => {}
-                    Err(err) => self.last_error = Some(format!("{err:#}")),
+                };
+                if opened && view == View::Stories {
+                    self.mark_story_seen(story.expect("browser story present").id);
                 }
             }
 
@@ -163,6 +194,15 @@ impl App {
                     self.maybe_prefetch_comments();
                 }
             }
+            (View::Stories, Action::SelectStory(index)) => {
+                assert!(
+                    index < self.visible_story_count(),
+                    "story selection out of range: {index}"
+                );
+                self.story_list_state.select(Some(index));
+                self.ensure_selected_story_visible();
+                self.maybe_prefetch_comments();
+            }
 
             (View::Comments, Action::MoveDown) => {
                 let comment_len = self.comment_list.len();
@@ -190,6 +230,14 @@ impl App {
                     self.ensure_selected_comment_visible();
                 }
             }
+            (View::Comments, Action::SelectComment(index)) => {
+                assert!(
+                    index < self.comment_list.len(),
+                    "comment selection out of range: {index}"
+                );
+                self.comment_list_state.select(Some(index));
+                self.ensure_selected_comment_visible();
+            }
             (View::Comments, Action::Enter) => self.toggle_selected_comment_collapse(),
             (View::Comments, Action::Collapse) => self.collapse_selected_comment(),
             (View::Comments, Action::Expand) => self.expand_selected_comment(),
@@ -207,8 +255,7 @@ impl App {
             }
 
             (_, Action::OpenSettings) => {
-                self.settings_popup =
-                    Some(SettingsPopup::from_config(self.summarize_plugin.config()));
+                self.settings_popup = Some(SettingsPopup::from_config(&self.config));
             }
 
             (_, _) => {}
@@ -216,69 +263,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::{KeyCode, KeyModifiers};
-
         if key.kind == KeyEventKind::Release {
             return;
         }
-        self.last_user_activity = Instant::now();
-
-        if self.feed_filter_popup.is_some() {
-            self.handle_feed_filter_key(key);
-            return;
-        }
-
-        if self.settings_popup.is_some() {
-            self.handle_settings_key(key);
-            return;
-        }
-
-        if self.filter_input_active {
-            match key.code {
-                KeyCode::Enter => {
-                    self.filter_input_active = false;
-                }
-                KeyCode::Esc => {
-                    self.keyword_filter.clear();
-                    self.filter_input_active = false;
-                    self.recompute_visible_stories();
-                }
-                KeyCode::Backspace => {
-                    self.keyword_filter.pop();
-                    self.recompute_visible_stories();
-                }
-                KeyCode::Char(c)
-                    if key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT =>
-                {
-                    self.keyword_filter.push(c);
-                    self.recompute_visible_stories();
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        if self.search_input_active {
-            match key.code {
-                KeyCode::Enter => self.submit_search(),
-                KeyCode::Esc => self.cancel_search(),
-                KeyCode::Backspace => {
-                    self.search_query.pop();
-                }
-                KeyCode::Char(c)
-                    if key.modifiers == KeyModifiers::NONE
-                        || key.modifiers == KeyModifiers::SHIFT =>
-                {
-                    self.search_query.push(c);
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        if let Some(action) = self.input.on_key(key) {
-            self.handle_action(action);
-        }
+        let layer = self.input_layer();
+        let action = self.input.on_key(layer, key);
+        self.handle_action(action);
     }
 }

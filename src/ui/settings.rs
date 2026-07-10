@@ -83,6 +83,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
     }
 
+    if let Some(status) = &popup.api_key_status {
+        lines.push(Line::from(Span::styled(format!("  {status}"), theme::HINT)));
+    }
+
     lines.push(Line::raw(""));
 
     let show_saved = popup
@@ -120,7 +124,7 @@ pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
     if area.width < 20 || area.height < 10 {
         return None;
     }
-    let line_count = SettingsPopup::FIELD_COUNT + 5;
+    let line_count = SettingsPopup::FIELD_COUNT + 6;
     let desired_width = area.width.min(60);
     let desired_height = (line_count as u16).saturating_add(2).min(area.height);
     Some(super::centered(area, desired_width, desired_height))

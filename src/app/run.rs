@@ -1,22 +1,19 @@
-use super::{App, AppEvent, View};
-use crate::api::{DiskCacheConfig, FeedKind, HnClient};
-use crate::plugin::config::PluginConfig;
+use super::{App, AppEvent, TaskTarget, View};
+use crate::api::{DiskCacheConfig, FeedKind, HnClient, SearchClient, Sources};
+use crate::config::Config;
 use crate::state::StateStore;
+use crate::summarizer::Summarizer;
 use crate::tui::Tui;
 use crate::ui;
 use crate::Cli;
 use anyhow::{Context, Result};
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-pub async fn run(
-    cli: Cli,
-    plugin_config: Option<PluginConfig>,
-    config_path: Option<PathBuf>,
-) -> Result<()> {
+pub async fn run(cli: Cli, config: Config) -> Result<()> {
     let cache_dir = if cli.no_file_cache {
         None
     } else {
@@ -37,7 +34,13 @@ pub async fn run(
 
     let backend = cli.resolved_backend()?;
     let base_url = cli.resolved_base_url(backend);
+    let http = reqwest::Client::builder()
+        .pool_max_idle_per_host(10)
+        .pool_idle_timeout(Duration::from_secs(30))
+        .build()
+        .context("build shared HTTP client")?;
     let client = HnClient::new(
+        http.clone(),
         base_url,
         backend,
         cli.cache_size,
@@ -45,15 +48,18 @@ pub async fn run(
         disk_cache,
     )?;
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
+    let search = SearchClient::new(http.clone(), "https://hn.algolia.com/api/v1/search")?;
+    let summarizer = Summarizer::new(config.summarize().cloned(), config.api_key_override(), http);
+    let sources = Sources::new(Arc::new(client), Arc::new(search));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(
         cli,
-        client,
+        sources,
         tx.clone(),
         state_store.clone(),
-        plugin_config,
-        config_path,
+        config,
+        summarizer,
     );
 
     if let Some(store) = &state_store {
@@ -114,6 +120,7 @@ pub async fn run(
     }
 
     drop(tui);
+    app.tasks.cancel_and_wait(TaskTarget::StoryStateSave).await;
     if let Some(store) = &state_store {
         if !app.story_ids.is_empty() && !app.stories.is_empty() {
             store

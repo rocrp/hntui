@@ -2,9 +2,9 @@ use super::comment_tree::{
     apply_default_expansion, flatten_visible_comments, info_for_comment as comment_info_in_tree,
     set_children_loading as set_children_loading_in_tree, set_collapse as set_collapse_in_tree,
 };
-use super::{App, AppEvent, LoadTarget, View};
+use super::{App, AppEvent, CommentLoadKind, TaskTarget, View};
 use crate::api::{CommentNode, Story};
-use crate::plugin::PluginContext;
+use crate::summarizer::SummaryInput;
 use crate::ui::theme;
 use anyhow::{Context, Result};
 use std::time::Instant;
@@ -39,34 +39,27 @@ impl App {
             return;
         }
 
-        if self.comment_prefetch_in_flight.contains_key(&story.id) {
-            self.awaiting_prefetch_story_id = Some(story.id);
-            self.view = View::Comments;
-            self.last_error = None;
-            let is_same_story = self
-                .current_story
-                .as_ref()
-                .is_some_and(|current| current.id == story.id);
-            self.current_story = Some(story);
-            self.comment_loading = true;
-            if !is_same_story {
-                self.reset_comment_state();
-            }
-            return;
-        }
-
         self.load_comments_for_story(story, true);
     }
 
     pub(super) fn load_comments_for_story(&mut self, story: Story, switch_view: bool) {
-        let generation = self.comments_generation.advance();
-        self.awaiting_prefetch_story_id = None;
-
         if switch_view {
             self.view = View::Comments;
         }
 
         self.last_error = None;
+        if let Some(previous_story_id) = self
+            .current_story
+            .as_ref()
+            .map(|current| current.id)
+            .filter(|&id| id != story.id)
+        {
+            self.tasks
+                .cancel(TaskTarget::CommentRoots(previous_story_id));
+            if self.pending_summarize_story_id == Some(previous_story_id) {
+                self.pending_summarize_story_id = None;
+            }
+        }
         let is_same_story = self
             .current_story
             .as_ref()
@@ -78,14 +71,13 @@ impl App {
         }
 
         let story_id = story.id;
-        let client = self.client.clone();
-        self.spawn_load_detached(
-            LoadTarget::Comments,
-            generation,
-            async move { client.fetch_comment_roots(&story).await },
-            move |comments| AppEvent::CommentsLoaded {
-                generation,
-                story_id,
+        let source = self.sources.stories.clone();
+        self.tasks.spawn(
+            TaskTarget::CommentRoots(story_id),
+            async move { source.comment_roots(story).await },
+            move |task, comments| AppEvent::CommentsLoaded {
+                task,
+                kind: CommentLoadKind::Foreground,
                 comments,
             },
         );
@@ -100,32 +92,32 @@ impl App {
         if switch_view {
             self.view = View::Comments;
         }
-        self.awaiting_prefetch_story_id = None;
         self.comment_loading = false;
-        self.comment_children_in_flight.clear();
+        self.tasks
+            .cancel_where(|target| matches!(target, TaskTarget::CommentChildren(_)));
         self.last_error = None;
         self.current_story = Some(story);
         self.comment_tree = comments;
         self.apply_default_comment_expansion();
         self.rebuild_comment_list(None);
         self.comment_list_state.select(Some(0));
-        self.comment_line_offset = 0;
+        self.comment_layout.invalidate();
         *self.comment_list_state.offset_mut() = 0;
     }
 
     pub(super) fn reset_comment_state(&mut self) {
         self.comment_tree.clear();
-        self.comment_children_in_flight.clear();
+        self.tasks
+            .cancel_where(|target| matches!(target, TaskTarget::CommentChildren(_)));
         self.comment_list.clear();
-        self.comment_item_heights.clear();
-        self.comment_line_offset = 0;
+        self.comment_layout.invalidate();
         self.comment_list_state.select(Some(0));
         *self.comment_list_state.offset_mut() = 0;
     }
 
     pub(super) fn rebuild_comment_list(&mut self, preserve_comment_id: Option<u64>) {
         self.comment_list = flatten_visible_comments(&self.comment_tree);
-        self.comment_item_heights.clear();
+        self.comment_layout.invalidate();
 
         let Some(id) = preserve_comment_id else {
             return;
@@ -143,7 +135,10 @@ impl App {
     }
 
     fn start_loading_comment_children(&mut self, parent_id: u64) {
-        if self.comment_children_in_flight.contains_key(&parent_id) {
+        if self
+            .tasks
+            .is_running(TaskTarget::CommentChildren(parent_id))
+        {
             return;
         }
 
@@ -157,10 +152,6 @@ impl App {
             return;
         }
 
-        let generation = self.comment_children_generation.advance();
-        self.comment_children_in_flight
-            .insert(parent_id, generation);
-
         if set_children_loading_in_tree(&mut self.comment_tree, parent_id, true).is_none() {
             self.last_error = Some(format!("comment not found id={parent_id}"));
             return;
@@ -171,23 +162,21 @@ impl App {
         }
 
         self.rebuild_comment_list(Some(parent_id));
-        self.ensure_selected_comment_visible();
 
         let depth = parent_depth.saturating_add(1);
-        let client = self.client.clone();
-        self.spawn_fetch_detached(
-            async move { client.fetch_comment_children(&kids, depth).await },
-            move |children| AppEvent::CommentChildrenLoaded {
-                generation,
-                parent_id,
-                children,
-            },
-            move |message| AppEvent::CommentChildrenError {
-                generation,
-                parent_id,
-                message,
-            },
+        let source = self.sources.stories.clone();
+        self.tasks.spawn(
+            TaskTarget::CommentChildren(parent_id),
+            async move { source.comment_children(kids, depth).await },
+            move |task, children| AppEvent::CommentChildrenLoaded { task, children },
         );
+    }
+
+    pub(super) fn cancel_comment_root_tasks(&mut self) {
+        self.tasks
+            .cancel_where(|target| matches!(target, TaskTarget::CommentRoots(_)));
+        self.comment_loading = false;
+        self.pending_summarize_story_id = None;
     }
 
     pub(super) fn copy_selected_comment(&mut self) {
@@ -197,7 +186,7 @@ impl App {
         let Some(comment) = self.comment_list.get(selected) else {
             return;
         };
-        let plain = crate::ui::comment_view::hn_html_to_plain(&comment.text);
+        let plain = crate::text::hn_html_to_plain(&comment.text);
         let by = comment.by.as_deref().unwrap_or("[unknown]");
         let text = format!("{by}: {plain}");
         match copy_to_clipboard(text) {
@@ -228,7 +217,6 @@ impl App {
         }
 
         self.rebuild_comment_list(Some(id));
-        self.ensure_selected_comment_visible();
     }
 
     pub(super) fn expand_selected_comment(&mut self) {
@@ -255,7 +243,6 @@ impl App {
         }
 
         self.rebuild_comment_list(Some(id));
-        self.ensure_selected_comment_visible();
     }
 
     pub(super) fn toggle_selected_comment_collapse(&mut self) {
@@ -300,31 +287,25 @@ impl App {
 
         self.pending_summarize_story_id = Some(story.id);
 
-        if self.comment_prefetch_in_flight.contains_key(&story.id) {
-            self.awaiting_prefetch_story_id = Some(story.id);
-            self.last_error = None;
-            let is_same_story = self
-                .current_story
-                .as_ref()
-                .is_some_and(|current| current.id == story.id);
-            self.current_story = Some(story);
-            self.comment_loading = true;
-            if !is_same_story {
-                self.reset_comment_state();
-            }
-            return;
-        }
-
         self.load_comments_for_story(story, false);
     }
 
     pub(super) fn start_summary_for_loaded_comments(&mut self) {
-        let ctx = PluginContext {
-            current_story: self.current_story.as_ref(),
-            comment_list: &self.comment_list,
-            tx: self.tx.clone(),
+        let Some(story) = self.current_story.clone() else {
+            self.summary_overlay.fail("No story selected".to_string());
+            return;
         };
-        self.summarize_plugin.start(&ctx);
+        self.summary_overlay.begin(&story, self.comment_list.len());
+        let input = SummaryInput {
+            story,
+            comments: self.comment_list.clone(),
+        };
+        let summarizer = self.summarizer.clone();
+        self.tasks.spawn_stream(
+            TaskTarget::Summary,
+            summarizer.summarize(input),
+            |task, event| AppEvent::Summary { task, event },
+        );
     }
 
     pub(super) fn maybe_start_pending_summary(&mut self, story_id: u64) {

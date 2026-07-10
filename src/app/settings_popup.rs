@@ -1,4 +1,4 @@
-use crate::plugin::config::SummarizeConfig;
+use crate::config::{Config, SummarizeConfig};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,7 @@ pub struct SettingsPopup {
     pub base_url: String,
     pub max_comments: String,
     pub system_prompt: String,
+    pub api_key_status: Option<String>,
     pub dirty: bool,
     pub saved_at: Option<Instant>,
 }
@@ -51,7 +52,11 @@ pub struct SettingsPopup {
 impl SettingsPopup {
     pub const FIELD_COUNT: usize = SettingsField::ALL.len();
 
-    pub fn from_config(config: &Option<SummarizeConfig>) -> Self {
+    pub fn from_config(config: &Config) -> Self {
+        Self::from_summarize(config.summarize(), config.effective_api_key().status())
+    }
+
+    fn from_summarize(config: Option<&SummarizeConfig>, api_key_status: Option<String>) -> Self {
         match config {
             Some(c) => Self {
                 cursor: 0,
@@ -63,6 +68,7 @@ impl SettingsPopup {
                 base_url: c.base_url.clone().unwrap_or_default(),
                 max_comments: c.max_comments.to_string(),
                 system_prompt: c.system_prompt.clone(),
+                api_key_status,
                 dirty: false,
                 saved_at: None,
             },
@@ -76,6 +82,7 @@ impl SettingsPopup {
                 base_url: String::new(),
                 max_comments: "200".to_string(),
                 system_prompt: String::new(),
+                api_key_status,
                 dirty: false,
                 saved_at: None,
             },
@@ -202,7 +209,7 @@ mod tests {
 
     #[test]
     fn edit_confirm_updates_selected_field() {
-        let mut popup = SettingsPopup::from_config(&None);
+        let mut popup = SettingsPopup::from_summarize(None, None);
         popup.cursor = 0;
         popup.start_editing();
         popup.edit_buffer = "openai/gpt-4o-mini".to_string();
@@ -218,7 +225,7 @@ mod tests {
 
     #[test]
     fn unchanged_edit_does_not_mark_dirty() {
-        let mut popup = SettingsPopup::from_config(&None);
+        let mut popup = SettingsPopup::from_summarize(None, None);
         popup.model = "gemini/gemini-flash-lite-latest".to_string();
         popup.cursor = 0;
         popup.start_editing();
@@ -231,7 +238,7 @@ mod tests {
 
     #[test]
     fn word_boundaries_handle_unicode() {
-        let mut popup = SettingsPopup::from_config(&None);
+        let mut popup = SettingsPopup::from_summarize(None, None);
         popup.edit_buffer = "alpha βeta gamma".to_string();
         popup.edit_cursor = popup.edit_buffer.chars().count();
 
@@ -242,7 +249,7 @@ mod tests {
 
     #[test]
     fn delete_word_backward_removes_previous_word_without_breaking_utf8() {
-        let mut popup = SettingsPopup::from_config(&None);
+        let mut popup = SettingsPopup::from_summarize(None, None);
         popup.edit_buffer = "hello 世界".to_string();
         popup.edit_cursor = popup.edit_buffer.chars().count();
 

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+async-stream = "0.3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
@@ -25,6 +26,9 @@ toml = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 chrono = { version = "0.4.44", default-features = false, features = ["alloc"] }
 regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 arboard = "3"

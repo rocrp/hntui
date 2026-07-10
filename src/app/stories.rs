@@ -1,6 +1,5 @@
-use super::{App, AppEvent, LoadTarget, StoriesLoadMode};
+use super::{App, AppEvent, StoriesLoadMode, TaskTarget};
 use crate::api::{FeedKind, Story};
-use crate::logging;
 
 impl App {
     pub fn restore_story_list_state(
@@ -20,13 +19,12 @@ impl App {
         self.story_ids = story_ids;
         self.stories = stories;
         self.story_loading = false;
-        self.prefetch_in_flight = false;
         self.story_list_state.select(Some(0));
         *self.story_list_state.offset_mut() = 0;
         self.recompute_visible_stories();
     }
 
-    pub(super) fn save_story_list_state_background(&self) {
+    pub(super) fn save_story_list_state_background(&mut self) {
         if self.search_active {
             return;
         }
@@ -41,14 +39,15 @@ impl App {
         let stories = self.stories.clone();
         let feed = self.current_feed.as_str().to_string();
         let seen_story_ids: Vec<u64> = self.seen_story_ids.iter().copied().collect();
-        tokio::spawn(async move {
-            if let Err(err) = store
-                .save_story_list_state(story_ids, stories, feed, seen_story_ids)
-                .await
-            {
-                logging::log_error(format!("failed to save story list state: {err:#}"));
-            }
-        });
+        self.tasks.spawn(
+            TaskTarget::StoryStateSave,
+            async move {
+                store
+                    .save_story_list_state(story_ids, stories, feed, seen_story_ids)
+                    .await
+            },
+            |task, ()| AppEvent::TaskCompleted { task },
+        );
     }
 
     pub fn is_story_seen(&self, id: u64) -> bool {
@@ -62,31 +61,26 @@ impl App {
     }
 
     pub fn refresh_stories(&mut self) {
-        let generation = self.stories_generation.advance();
-
         self.pending_story_selection_id = self.selected_story().map(|s| s.id);
 
         self.last_error = None;
         self.story_loading = true;
-        self.prefetch_in_flight = false;
         self.has_more_stories = true;
-        for (_, inflight) in self.comment_prefetch_in_flight.drain() {
-            inflight.handle.abort();
-        }
+        self.tasks.cancel(TaskTarget::Search);
+        self.cancel_comment_root_tasks();
         if self.stories.is_empty() {
             self.story_list_state.select(Some(0));
             *self.story_list_state.offset_mut() = 0;
         }
 
-        let client = self.client.clone();
+        let source = self.sources.stories.clone();
         let count = self.cli.count;
         let feed = self.current_feed;
-        self.spawn_load_detached(
-            LoadTarget::Stories,
-            generation,
-            async move { client.fetch_initial_stories(feed, count).await },
-            move |(story_ids, stories)| AppEvent::StoriesLoaded {
-                generation,
+        self.tasks.spawn(
+            TaskTarget::Stories,
+            async move { source.initial_stories(feed, count).await },
+            move |task, (story_ids, stories)| AppEvent::StoriesLoaded {
+                task,
                 mode: StoriesLoadMode::Replace,
                 story_ids: Some(story_ids),
                 stories,

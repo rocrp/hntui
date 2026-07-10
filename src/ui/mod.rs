@@ -1,13 +1,15 @@
+pub mod comment_layout;
 pub mod comment_view;
 pub mod feed_filter;
 pub mod help;
 pub mod markdown;
-pub mod plugin_overlay;
 pub mod settings;
 pub mod story_list;
+pub mod summary_overlay;
 pub mod theme;
 
 use crate::app::{App, View};
+use crate::input::InputLayer;
 use crate::logging;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -38,24 +40,27 @@ pub fn render(frame: &mut Frame, app: &App) {
         View::Comments => comment_view::render(frame, app),
     }
 
-    let has_overlay = app.summarize_plugin.is_overlay_visible()
-        || app.help_visible
-        || app.feed_filter_popup.is_some()
-        || app.settings_popup.is_some();
+    let layer = app.input_layer();
+    let has_overlay = matches!(
+        layer,
+        InputLayer::Help
+            | InputLayer::Summary
+            | InputLayer::FeedFilter
+            | InputLayer::Settings
+            | InputLayer::SettingsEditor
+    );
     if has_overlay {
         frame.render_widget(Dim, frame.area());
     }
 
-    let spinner = app.spinner_frame();
-    plugin_overlay::render(frame, &app.summarize_plugin, spinner);
-    if app.feed_filter_popup.is_some() {
-        feed_filter::render(frame, app);
-    }
-    if app.settings_popup.is_some() {
-        settings::render(frame, app);
-    }
-    if app.help_visible {
-        help::render(frame, app);
+    match layer {
+        InputLayer::Help => help::render(frame, app),
+        InputLayer::Summary => {
+            summary_overlay::render(frame, &app.summary_overlay, app.spinner_frame());
+        }
+        InputLayer::FeedFilter => feed_filter::render(frame, app),
+        InputLayer::Settings | InputLayer::SettingsEditor => settings::render(frame, app),
+        InputLayer::FilterText | InputLayer::SearchText | InputLayer::View => {}
     }
 }
 
