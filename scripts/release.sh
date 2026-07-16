@@ -71,11 +71,9 @@ fi
 cp "$temporary" Cargo.toml
 rollback=true
 cargo check
+cargo test --locked
 git add Cargo.toml Cargo.lock
-
-if ! git diff --cached --quiet; then
-  git commit -m "chore(release): ${tag}"
-fi
+git commit --allow-empty -m "chore(release): ${tag}"
 rollback=false
 
 git tag -a "$tag" -m "$tag"

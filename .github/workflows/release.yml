@@ -27,7 +27,10 @@ jobs:
               exit
             }
           ' Cargo.toml)"
-          test -n "$version"
+          if [[ -z "$version" ]]; then
+            echo "could not read [package].version from Cargo.toml" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then

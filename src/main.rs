@@ -50,7 +50,7 @@ pub struct Cli {
     pub no_file_cache: bool,
 
     /// Directory for the on-disk item cache (defaults to OS cache dir).
-    #[arg(long, value_parser = NonEmptyStringValueParser::new().map(PathBuf::from))]
+    #[arg(long)]
     pub file_cache_dir: Option<PathBuf>,
 
     /// Log file path (disabled by default).

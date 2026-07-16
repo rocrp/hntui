@@ -17,8 +17,6 @@ fn version_flags_report_the_manifest_version() {
         assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
         assert!(output.stderr.is_empty());
     }
-
-    assert_eq!(env!("CARGO_PKG_VERSION"), "0.4.3");
 }
 
 #[test]
