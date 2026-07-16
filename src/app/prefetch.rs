@@ -34,7 +34,7 @@ impl App {
 
         let source = self.sources.stories.clone();
         let story_ids = self.story_ids.clone();
-        let page_size = self.cli.page_size;
+        let page_size = self.cli.page_size.get();
         let feed = self.current_feed;
         self.tasks.spawn(
             TaskTarget::Stories,

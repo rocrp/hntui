@@ -118,9 +118,13 @@ else
   sudo mv "$exe" "$dest"
 fi
 
+if ! installed_version="$("$dest" --version 2>&1)"; then
+  die "installed binary failed to run: $dest: $installed_version"
+fi
+
 echo "installed: $dest"
 case ":${PATH}:" in
   *":${install_dir}:"*) ;;
   *) echo "note: add to PATH: ${install_dir}" ;;
 esac
-
+printf '%s\n' "$installed_version"

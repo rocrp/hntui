@@ -7,7 +7,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  version-guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches Cargo.toml
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '
+            /^\[package\]$/ { in_package = 1; next }
+            in_package && /^version[[:space:]]*=/ {
+              gsub(/^[^\"]*\"|\".*$/, "")
+              print
+              exit
+            }
+          ' Cargo.toml)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "$tag_version" != "$version" ]]; then
+              echo "release tag v${tag_version} does not match Cargo.toml ${version}" >&2
+              exit 1
+            fi
+          fi
+
   build-macos:
+    needs: version-guard
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -113,6 +145,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
+    needs: version-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,6 +178,7 @@ jobs:
 
   smoke-arch:
     needs:
+      - version-guard
       - build-linux
     runs-on: ubuntu-latest
     container: archlinux:latest
@@ -163,7 +197,12 @@ jobs:
           set -euo pipefail
           mkdir -p out
           tar -xzf dist/*.tar.gz -C out
-          ./out/hntui --help
+          expected="hntui ${{ needs.version-guard.outputs.version }}"
+          actual="$(./out/hntui --version)"
+          if [ "$actual" != "$expected" ]; then
+            echo "version mismatch: expected '$expected', got '$actual'" >&2
+            exit 1
+          fi
 
   publish:
     needs:
@@ -247,7 +286,7 @@ jobs:
             end
 
             test do
-              system "#{bin}/hntui", "--help"
+              assert_match version.to_s, shell_output("#{bin}/hntui --version")
             end
           end
           EOF
@@ -259,4 +298,3 @@ jobs:
           git add Formula/hntui.rb
           git commit -m "Update hntui to ${version}"
           git push
-

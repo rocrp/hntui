@@ -1,39 +1,16 @@
 use anyhow::{anyhow, Result};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
 /// Which HN API backend to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum ApiBackend {
     /// node-hnapi (api.hackerwebapp.com) — pre-assembled responses, fewer requests.
     #[default]
+    #[value(name = "hackerweb")]
     HackerWeb,
     /// Official Firebase API (hacker-news.firebaseio.com/v0) — item-level requests.
     Firebase,
-}
-
-impl fmt::Display for ApiBackend {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::HackerWeb => write!(f, "hackerweb"),
-            Self::Firebase => write!(f, "firebase"),
-        }
-    }
-}
-
-impl FromStr for ApiBackend {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "hackerweb" | "hackerweb-api" | "hw" => Ok(Self::HackerWeb),
-            "firebase" | "fb" => Ok(Self::Firebase),
-            _ => Err(anyhow!(
-                "unknown API backend: {s:?} (expected hackerweb or firebase)"
-            )),
-        }
-    }
 }
 
 /// Which feed to display.

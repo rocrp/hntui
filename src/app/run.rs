@@ -29,11 +29,11 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
     let state_store = cache_dir.clone().map(StateStore::new);
     let disk_cache = cache_dir.clone().map(|dir| DiskCacheConfig {
         dir,
-        ttl: Duration::from_secs(cli.file_cache_ttl_secs),
+        ttl: Duration::from_secs(cli.file_cache_ttl_secs.get()),
     });
 
-    let backend = cli.resolved_backend()?;
-    let base_url = cli.resolved_base_url(backend);
+    let backend = cli.api_backend;
+    let base_url = cli.resolved_base_url();
     let http = reqwest::Client::builder()
         .pool_max_idle_per_host(10)
         .pool_idle_timeout(Duration::from_secs(30))
@@ -43,8 +43,8 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
         http.clone(),
         base_url,
         backend,
-        cli.cache_size,
-        cli.concurrency,
+        cli.cache_size.get(),
+        cli.concurrency.get(),
         disk_cache,
     )?;
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));

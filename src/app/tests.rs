@@ -1,10 +1,11 @@
 use super::test_support::{controlled_root_request, ControlledStorySource};
 use super::*;
-use crate::api::{InMemorySource, Sources};
+use crate::api::{ApiBackend, InMemorySource, Sources};
 use crate::input::{Action, SummaryAction};
 use crate::summarizer::{Summarizer, SummaryEvent};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use futures::StreamExt;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
 
 fn story(id: u64) -> Story {
@@ -39,17 +40,17 @@ fn comment(id: u64) -> CommentNode {
 
 fn cli() -> Cli {
     Cli {
-        count: 30,
-        page_size: 30,
-        cache_size: 100,
-        concurrency: 4,
+        count: NonZeroUsize::new(30).unwrap(),
+        page_size: NonZeroUsize::new(30).unwrap(),
+        cache_size: NonZeroUsize::new(100).unwrap(),
+        concurrency: NonZeroUsize::new(4).unwrap(),
         no_file_cache: true,
         file_cache_dir: None,
         log_file: None,
-        file_cache_ttl_secs: 3600,
-        api_backend: "hackerweb".to_string(),
+        file_cache_ttl_secs: NonZeroU64::new(3600).unwrap(),
+        api_backend: ApiBackend::HackerWeb,
         base_url: None,
-        plugin_config: None,
+        config: None,
         env_file: None,
     }
 }

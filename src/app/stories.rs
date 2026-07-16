@@ -74,7 +74,7 @@ impl App {
         }
 
         let source = self.sources.stories.clone();
-        let count = self.cli.count;
+        let count = self.cli.count.get();
         let feed = self.current_feed;
         self.tasks.spawn(
             TaskTarget::Stories,

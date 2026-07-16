@@ -76,7 +76,7 @@ The UI uses a fixed Catppuccin Frappé theme.
 2. `hntui` binary directory
 3. `~/.config/hntui/` (recommended)
 
-Explicit config path: `hntui --plugin-config PATH`
+Explicit config path: `hntui --config PATH`
 
 ### AI summarization (`config.toml`)
 

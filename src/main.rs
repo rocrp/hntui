@@ -13,106 +13,88 @@ mod ui;
 
 use crate::api::ApiBackend;
 use anyhow::Context;
+use clap::builder::{NonEmptyStringValueParser, TypedValueParser};
 use clap::Parser;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "hntui", about = "Hacker News TUI")]
+#[command(
+    name = "hntui",
+    version,
+    about = "Hacker News TUI",
+    help_template = "{before-help}{name} {version}\n\
+{about-with-newline}\n\
+{usage-heading} {usage}\n\n\
+{all-args}{after-help}"
+)]
 pub struct Cli {
     /// Initial number of stories to load.
-    #[arg(long, default_value_t = 30)]
-    pub count: usize,
+    #[arg(long, default_value = "30")]
+    pub count: NonZeroUsize,
 
     /// Page size for prefetching additional stories.
-    #[arg(long, default_value_t = 30)]
-    pub page_size: usize,
+    #[arg(long, default_value = "30")]
+    pub page_size: NonZeroUsize,
 
     /// Max items kept in the in-memory LRU cache.
-    #[arg(long, default_value_t = 1000)]
-    pub cache_size: usize,
+    #[arg(long, default_value = "1000")]
+    pub cache_size: NonZeroUsize,
 
     /// Max simultaneous HTTP requests.
-    #[arg(long, default_value_t = 8)]
-    pub concurrency: usize,
+    #[arg(long, default_value = "8")]
+    pub concurrency: NonZeroUsize,
 
     /// Disable the on-disk cache (items + story list state).
     #[arg(long, default_value_t = false)]
     pub no_file_cache: bool,
 
     /// Directory for the on-disk item cache (defaults to OS cache dir).
-    #[arg(long)]
+    #[arg(long, value_parser = NonEmptyStringValueParser::new().map(PathBuf::from))]
     pub file_cache_dir: Option<PathBuf>,
 
     /// Log file path (disabled by default).
-    #[arg(long)]
+    #[arg(long, value_parser = NonEmptyStringValueParser::new().map(PathBuf::from))]
     pub log_file: Option<PathBuf>,
 
     /// Max age for cached items (seconds).
-    #[arg(long, default_value_t = 3600)]
-    pub file_cache_ttl_secs: u64,
+    #[arg(long, default_value = "3600")]
+    pub file_cache_ttl_secs: NonZeroU64,
 
     /// API backend: "hackerweb" (default, faster) or "firebase" (official).
-    #[arg(long, default_value = "hackerweb")]
-    pub api_backend: String,
+    #[arg(long, value_enum, default_value = "hackerweb")]
+    pub api_backend: ApiBackend,
 
     /// Hacker News API base URL (auto-set from --api-backend if omitted).
-    #[arg(long)]
+    #[arg(long, value_parser = parse_nonblank)]
     pub base_url: Option<String>,
 
-    /// Config file path (legacy flag name; will search defaults when omitted).
-    #[arg(long)]
-    pub plugin_config: Option<PathBuf>,
+    /// Config file path (searches default locations when omitted).
+    #[arg(long, value_parser = NonEmptyStringValueParser::new().map(PathBuf::from))]
+    pub config: Option<PathBuf>,
 
     /// Env file to load before startup. Existing process env wins.
     /// If omitted, `~/.env.smolllm` is auto-loaded when present.
-    #[arg(long)]
+    #[arg(long, value_parser = NonEmptyStringValueParser::new().map(PathBuf::from))]
     pub env_file: Option<PathBuf>,
 }
 
-impl Cli {
-    pub fn resolved_backend(&self) -> anyhow::Result<ApiBackend> {
-        self.api_backend.parse()
+fn parse_nonblank(value: &str) -> Result<String, &'static str> {
+    if value.trim().is_empty() {
+        return Err("value must not be empty");
     }
-
-    pub fn resolved_base_url(&self, backend: ApiBackend) -> String {
-        if let Some(url) = &self.base_url {
-            return url.clone();
-        }
-        match backend {
-            ApiBackend::HackerWeb => "https://api.hackerwebapp.com".to_string(),
-            ApiBackend::Firebase => "https://hacker-news.firebaseio.com/v0".to_string(),
-        }
-    }
+    Ok(value.to_string())
 }
 
 impl Cli {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.count > 0, "--count must be > 0");
-        anyhow::ensure!(self.page_size > 0, "--page-size must be > 0");
-        anyhow::ensure!(self.cache_size > 0, "--cache-size must be > 0");
-        anyhow::ensure!(self.concurrency > 0, "--concurrency must be > 0");
-        anyhow::ensure!(
-            self.file_cache_ttl_secs > 0,
-            "--file-cache-ttl-secs must be > 0"
-        );
-        // Validate api_backend parses correctly.
-        self.resolved_backend()?;
+    pub fn resolved_base_url(&self) -> String {
         if let Some(url) = &self.base_url {
-            anyhow::ensure!(!url.trim().is_empty(), "--base-url must be non-empty");
+            return url.clone();
         }
-        if let Some(path) = &self.log_file {
-            anyhow::ensure!(!path.as_os_str().is_empty(), "--log-file must be non-empty");
+        match self.api_backend {
+            ApiBackend::HackerWeb => "https://api.hackerwebapp.com".to_string(),
+            ApiBackend::Firebase => "https://hacker-news.firebaseio.com/v0".to_string(),
         }
-        if let Some(path) = &self.plugin_config {
-            anyhow::ensure!(
-                !path.as_os_str().is_empty(),
-                "--plugin-config must be non-empty"
-            );
-        }
-        if let Some(path) = &self.env_file {
-            anyhow::ensure!(!path.as_os_str().is_empty(), "--env-file must be non-empty");
-        }
-        Ok(())
     }
 }
 
@@ -142,12 +124,11 @@ fn load_env_file(explicit: Option<&std::path::Path>) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    cli.validate()?;
     load_env_file(cli.env_file.as_deref())?;
     logging::init(cli.log_file.clone()).context("init logging")?;
     logging::init_log_bridge();
 
-    let config = config::Config::load(cli.plugin_config.as_deref()).context("load config")?;
+    let config = config::Config::load(cli.config.as_deref()).context("load config")?;
 
     app::run(cli, config).await
 }
