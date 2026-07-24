@@ -7,6 +7,11 @@ use crossterm::event::KeyEventKind;
 use std::time::Instant;
 
 impl App {
+    fn open_help(&mut self) {
+        self.help_overlay.open();
+        self.help_visible = true;
+    }
+
     pub(crate) fn input_layer(&self) -> InputLayer {
         if self.help_visible {
             InputLayer::Help
@@ -33,8 +38,20 @@ impl App {
         self.last_user_activity = Instant::now();
         match action {
             Action::Noop => return,
-            Action::Help(HelpAction::Dismiss) => {
-                self.help_visible = false;
+            Action::Help(action) => {
+                match action {
+                    HelpAction::Dismiss => self.help_visible = false,
+                    HelpAction::ScrollDown(amount) => self.help_overlay.scroll_down(amount),
+                    HelpAction::ScrollUp(amount) => self.help_overlay.scroll_up(amount),
+                    HelpAction::PageDown => {
+                        let amount = self.help_overlay.page_scroll_amount();
+                        self.help_overlay.scroll_down(amount);
+                    }
+                    HelpAction::PageUp => {
+                        let amount = self.help_overlay.page_scroll_amount();
+                        self.help_overlay.scroll_up(amount);
+                    }
+                }
                 return;
             }
             Action::Summary(action) => {
@@ -60,7 +77,7 @@ impl App {
                             self.last_error = Some(format!("clipboard: {error:#}"));
                         }
                     }
-                    SummaryAction::OpenHelp => self.help_visible = true,
+                    SummaryAction::OpenHelp => self.open_help(),
                 }
                 return;
             }
@@ -84,7 +101,7 @@ impl App {
         }
 
         match (self.view, action) {
-            (_, Action::OpenHelp) => self.help_visible = true,
+            (_, Action::OpenHelp) => self.open_help(),
             (View::Stories, Action::BackOrQuit) if self.search_active => {
                 self.exit_search_mode();
             }

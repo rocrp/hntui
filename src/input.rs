@@ -15,6 +15,10 @@ pub enum InputLayer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpAction {
     Dismiss,
+    ScrollDown(usize),
+    ScrollUp(usize),
+    PageDown,
+    PageUp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +198,34 @@ mod routing_tests {
             Action::Summary(SummaryAction::GoTop)
         );
     }
+
+    #[test]
+    fn help_scroll_keys_route_to_help_actions() {
+        let cases = [
+            (
+                key(KeyCode::Char('j')),
+                Action::Help(HelpAction::ScrollDown(1)),
+            ),
+            (key(KeyCode::Down), Action::Help(HelpAction::ScrollDown(1))),
+            (
+                key(KeyCode::Char('k')),
+                Action::Help(HelpAction::ScrollUp(1)),
+            ),
+            (key(KeyCode::Up), Action::Help(HelpAction::ScrollUp(1))),
+            (
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+                Action::Help(HelpAction::PageDown),
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                Action::Help(HelpAction::PageUp),
+            ),
+        ];
+
+        for (key, expected) in cases {
+            assert_eq!(KeyState::default().on_key(InputLayer::Help, key), expected);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +279,14 @@ impl KeyState {
                 | (KeyCode::Esc, _)
                 | (KeyCode::Char('q'), KeyModifiers::NONE)
                 | (KeyCode::Char('c'), KeyModifiers::CONTROL) => Action::Help(HelpAction::Dismiss),
+                (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
+                    Action::Help(HelpAction::ScrollDown(1))
+                }
+                (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
+                    Action::Help(HelpAction::ScrollUp(1))
+                }
+                (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Help(HelpAction::PageDown),
+                (KeyCode::Char('u'), KeyModifiers::CONTROL) => Action::Help(HelpAction::PageUp),
                 _ => Action::Noop,
             },
             InputLayer::Summary => self.summary_action(key),

@@ -16,6 +16,8 @@ mod actions;
 mod comment_tree;
 mod comments;
 mod events;
+#[cfg(test)]
+mod help_tests;
 mod list_nav;
 mod mouse;
 mod prefetch;
@@ -36,6 +38,7 @@ pub use self::settings_popup::SettingsPopup;
 use crate::tasks::TaskLifecycle;
 pub(crate) use crate::tasks::{TaskId, TaskTarget};
 use crate::ui::comment_layout::CommentLayout;
+use crate::ui::help::HelpOverlay;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -112,6 +115,7 @@ const PREFETCH_LOOKAHEAD: usize = 5;
 pub struct App {
     pub view: View,
     pub help_visible: bool,
+    pub help_overlay: HelpOverlay,
     pub stories: Vec<Story>,
     pub story_ids: Vec<u64>,
     pub story_list_state: ListState,
@@ -181,6 +185,7 @@ impl App {
         Self {
             view: View::Stories,
             help_visible: false,
+            help_overlay: HelpOverlay::default(),
             stories: vec![],
             story_ids: vec![],
             story_list_state,
@@ -281,6 +286,7 @@ impl App {
             self.summary_overlay
                 .set_viewport(viewport.width, viewport.height);
         }
+        self.help_overlay.set_frame(area, self.view);
 
         match self.view {
             View::Stories => {

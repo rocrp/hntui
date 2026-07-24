@@ -17,9 +17,9 @@ impl App {
         let row = mouse.row;
         match self.input_layer() {
             InputLayer::Help => match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left)
-                | MouseEventKind::ScrollDown
-                | MouseEventKind::ScrollUp => Action::Help(HelpAction::Dismiss),
+                MouseEventKind::ScrollDown => Action::Help(HelpAction::ScrollDown(3)),
+                MouseEventKind::ScrollUp => Action::Help(HelpAction::ScrollUp(3)),
+                MouseEventKind::Down(MouseButton::Left) => Action::Help(HelpAction::Dismiss),
                 _ => Action::Noop,
             },
             InputLayer::Summary => {

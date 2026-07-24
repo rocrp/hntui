@@ -38,7 +38,7 @@ fn comment(id: u64) -> CommentNode {
     }
 }
 
-fn cli() -> Cli {
+pub(super) fn cli() -> Cli {
     Cli {
         count: NonZeroUsize::new(30).unwrap(),
         page_size: NonZeroUsize::new(30).unwrap(),
@@ -55,11 +55,11 @@ fn cli() -> Cli {
     }
 }
 
-fn key(code: KeyCode) -> KeyEvent {
+pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn left_click(column: u16, row: u16) -> MouseEvent {
+pub(super) fn left_click(column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column,
