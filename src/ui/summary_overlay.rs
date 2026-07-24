@@ -6,7 +6,9 @@ use anyhow::Context;
 use anyhow::Result;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui::Frame;
 use std::time::Instant;
 
@@ -129,6 +131,10 @@ impl SummaryOverlay {
     fn max_scroll_offset(&self) -> usize {
         self.wrapped_line_count()
             .saturating_sub(self.viewport_height)
+    }
+
+    fn content_overflows_viewport(&self) -> bool {
+        self.wrapped_line_count() > self.viewport_height
     }
 
     fn clamp_scroll(&mut self) {
@@ -276,6 +282,19 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
             .style(theme::POPUP),
         content_area,
     );
+    if overlay.content_overflows_viewport() {
+        // ScrollbarState counts reachable positions. `max + 1` keeps its thumb
+        // aligned with the viewport: top at offset 0, bottom at max offset.
+        let mut scrollbar_state =
+            ScrollbarState::new(overlay.max_scroll_offset().saturating_add(1))
+                .position(overlay.scroll_offset())
+                .viewport_content_length(overlay.viewport_height);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            content_area,
+            &mut scrollbar_state,
+        );
+    }
     let show_copied = overlay
         .copied_flash
         .is_some_and(|timestamp| timestamp.elapsed().as_secs() < 2);
@@ -329,12 +348,15 @@ fn reasoning_lines(buffer: &str, spinner: char) -> Vec<Line<'static>> {
 }
 
 #[cfg(test)]
+mod render_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::types::Story;
     use crate::summarizer::SummaryEvent;
 
-    fn story() -> Story {
+    pub(super) fn story() -> Story {
         Story {
             id: 42,
             title: "A story".to_string(),
@@ -405,7 +427,7 @@ mod tests {
         );
     }
 
-    fn completed_overlay(summary: &str) -> SummaryOverlay {
+    pub(super) fn completed_overlay(summary: &str) -> SummaryOverlay {
         let mut overlay = SummaryOverlay::default();
         overlay.begin(&story(), 2);
         overlay.handle_event(SummaryEvent::Chunk {
