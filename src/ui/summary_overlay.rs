@@ -73,7 +73,10 @@ impl SummaryOverlay {
                     }
                 }
                 if !content.is_empty() {
-                    self.content_started = true;
+                    if !self.content_started {
+                        self.content_started = true;
+                        self.scroll_offset = 0;
+                    }
                     self.summary.push_str(&content);
                     if self.state == SummaryState::Loading {
                         self.state = SummaryState::Streaming;
@@ -129,7 +132,16 @@ impl SummaryOverlay {
     }
 
     fn clamp_scroll(&mut self) {
-        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset());
+        self.scroll_offset = if self.is_reasoning_phase() {
+            self.max_scroll_offset()
+        } else {
+            self.scroll_offset.min(self.max_scroll_offset())
+        };
+    }
+
+    fn is_reasoning_phase(&self) -> bool {
+        matches!(self.state, SummaryState::Loading | SummaryState::Streaming)
+            && !self.content_started
     }
 
     fn reflow(&mut self) {
@@ -445,5 +457,56 @@ mod tests {
         overlay.scroll_down(usize::MAX);
 
         assert_eq!(overlay.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn reasoning_stream_stays_pinned_to_its_latest_line() {
+        let mut overlay = SummaryOverlay::default();
+        overlay.begin(&story(), 2);
+        overlay.set_viewport(40, 3);
+
+        overlay.handle_event(SummaryEvent::Chunk {
+            content: String::new(),
+            reasoning: "one\ntwo\nthree\nfour".to_string(),
+        });
+
+        assert_eq!(overlay.wrapped_line_count(), 6);
+        assert_eq!(overlay.scroll_offset(), 3);
+
+        overlay.scroll_up(2);
+
+        assert_eq!(overlay.scroll_offset(), 3);
+    }
+
+    #[test]
+    fn first_summary_content_resets_to_top_then_streaming_growth_holds_position() {
+        let mut overlay = SummaryOverlay::default();
+        overlay.begin(&story(), 2);
+        overlay.set_viewport(40, 3);
+        overlay.handle_event(SummaryEvent::Chunk {
+            content: String::new(),
+            reasoning: "one\ntwo\nthree\nfour".to_string(),
+        });
+        assert_eq!(overlay.scroll_offset(), 3);
+
+        overlay.handle_event(SummaryEvent::Chunk {
+            content: "one\n\ntwo\n\nthree\n\nfour".to_string(),
+            reasoning: String::new(),
+        });
+
+        assert_eq!(overlay.scroll_offset(), 0);
+        overlay.scroll_down(2);
+        assert_eq!(overlay.scroll_offset(), 2);
+        let initial_extent = overlay.wrapped_line_count();
+
+        overlay.handle_event(SummaryEvent::Chunk {
+            content: "\n\nfive\n\nsix".to_string(),
+            reasoning: String::new(),
+        });
+
+        assert!(overlay.wrapped_line_count() > initial_extent);
+        assert_eq!(overlay.scroll_offset(), 2);
+        overlay.scroll_down(usize::MAX);
+        assert!(overlay.scroll_offset() > 2);
     }
 }
