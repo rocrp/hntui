@@ -247,7 +247,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     if !overlay.is_visible() {
         return;
     }
-    let Some(popup) = popup_rect(frame.area()) else {
+    let Some(areas) = summary_areas(frame.area()) else {
         return;
     };
     let model_tag = if overlay.model_name.is_empty() {
@@ -272,18 +272,14 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, theme::HEADER_ACCENT));
-    let inner = block.inner(popup);
-    let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
-    let content_area = layout[0];
-    let hint_area = layout[1];
-    frame.render_widget(Clear, popup);
-    frame.render_widget(block.style(theme::POPUP), popup);
+    frame.render_widget(Clear, areas.popup);
+    frame.render_widget(block.style(theme::POPUP), areas.popup);
     frame.render_widget(
         overlay
             .content_paragraph(spinner)
             .scroll((overlay.render_scroll_offset(), 0))
             .style(theme::POPUP),
-        content_area,
+        areas.content,
     );
     if overlay.content_overflows_viewport() {
         // ScrollbarState counts reachable positions. `max + 1` keeps its thumb
@@ -294,7 +290,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
                 .viewport_content_length(overlay.scroll.viewport_height());
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            content_area,
+            areas.scrollbar,
             &mut scrollbar_state,
         );
     }
@@ -312,7 +308,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
         };
         Line::from(Span::styled(text, theme::HINT))
     };
-    frame.render_widget(Paragraph::new(hint).style(theme::POPUP), hint_area);
+    frame.render_widget(Paragraph::new(hint).style(theme::POPUP), areas.hint);
 }
 
 pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
@@ -327,10 +323,33 @@ pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn content_area(area: Rect) -> Option<Rect> {
+    Some(summary_areas(area)?.content)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SummaryAreas {
+    popup: Rect,
+    content: Rect,
+    scrollbar: Rect,
+    hint: Rect,
+}
+
+fn summary_areas(area: Rect) -> Option<SummaryAreas> {
     let popup = popup_rect(area)?;
     let inner = Block::default().borders(Borders::ALL).inner(popup);
-    let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
-    Some(layout[0])
+    let [body, hint] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
+    let [content, _gutter, scrollbar] = Layout::horizontal([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(body);
+    Some(SummaryAreas {
+        popup,
+        content,
+        scrollbar,
+        hint,
+    })
 }
 
 fn reasoning_lines(buffer: &str, spinner: char) -> Vec<Line<'static>> {
