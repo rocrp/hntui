@@ -277,8 +277,9 @@ impl App {
     pub fn prepare_frame(&mut self, area: Rect) {
         self.layout_areas.frame_area = area;
 
-        if let Some(height) = crate::ui::summary_overlay::content_height(area) {
-            self.summary_overlay.set_content_height(height);
+        if let Some(viewport) = crate::ui::summary_overlay::content_area(area) {
+            self.summary_overlay
+                .set_viewport(viewport.width, viewport.height);
         }
 
         match self.view {

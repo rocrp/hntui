@@ -27,7 +27,9 @@ pub struct SummaryOverlay {
     error: Option<String>,
     scroll_offset: usize,
     comment_count: usize,
-    content_height: usize,
+    viewport_width: u16,
+    viewport_height: usize,
+    wrapped_line_count: usize,
     reasoning: String,
     content_started: bool,
     model_name: String,
@@ -57,6 +59,7 @@ impl SummaryOverlay {
         self.story_score = story.score;
         self.story_author = story.by.clone();
         self.story_time = story.time;
+        self.reflow();
     }
 
     pub fn handle_event(&mut self, event: SummaryEvent) {
@@ -79,11 +82,13 @@ impl SummaryOverlay {
             }
             SummaryEvent::Complete => self.state = SummaryState::Done,
         }
+        self.reflow();
     }
 
     pub fn fail(&mut self, message: String) {
         self.state = SummaryState::Error;
         self.error = Some(message);
+        self.reflow();
     }
 
     pub fn dismiss(&mut self) {
@@ -92,18 +97,50 @@ impl SummaryOverlay {
 
     pub fn scroll_down(&mut self, amount: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
+        self.clamp_scroll();
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+        self.clamp_scroll();
     }
 
-    pub fn set_content_height(&mut self, height: usize) {
-        self.content_height = height;
+    pub fn set_viewport(&mut self, width: u16, height: u16) {
+        self.viewport_width = width;
+        self.viewport_height = usize::from(height);
+        self.reflow();
     }
 
     pub fn page_scroll_amount(&self) -> usize {
-        self.content_height.saturating_sub(2).max(1)
+        self.viewport_height.saturating_sub(2).max(1)
+    }
+
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    pub fn wrapped_line_count(&self) -> usize {
+        self.wrapped_line_count
+    }
+
+    fn max_scroll_offset(&self) -> usize {
+        self.wrapped_line_count()
+            .saturating_sub(self.viewport_height)
+    }
+
+    fn clamp_scroll(&mut self) {
+        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset());
+    }
+
+    fn reflow(&mut self) {
+        self.wrapped_line_count = self.content_paragraph(' ').line_count(self.viewport_width);
+        self.clamp_scroll();
+    }
+
+    fn render_scroll_offset(&self) -> u16 {
+        self.scroll_offset()
+            .try_into()
+            .expect("clamped summary scroll offset exceeds ratatui's u16 limit")
     }
 
     pub fn state(&self) -> SummaryState {
@@ -136,6 +173,36 @@ impl SummaryOverlay {
         output.push_str("---\n\n");
         output.push_str(&self.summary);
         output
+    }
+
+    fn content_lines(&self, spinner: char) -> Vec<Line<'static>> {
+        match self.state {
+            SummaryState::Loading if self.reasoning.is_empty() => {
+                vec![Line::from(Span::styled(
+                    format!("Waiting for LLM response {spinner}"),
+                    theme::HINT,
+                ))]
+            }
+            SummaryState::Loading => reasoning_lines(&self.reasoning, spinner),
+            SummaryState::Streaming if self.summary.is_empty() => {
+                reasoning_lines(&self.reasoning, spinner)
+            }
+            SummaryState::Streaming => {
+                let mut lines = markdown::render_markdown(&self.summary);
+                lines.push(Line::from(Span::styled(spinner.to_string(), theme::HINT)));
+                lines
+            }
+            SummaryState::Done => markdown::render_markdown(&self.summary),
+            SummaryState::Error => vec![Line::from(Span::styled(
+                self.error.as_deref().unwrap_or("Unknown error").to_string(),
+                theme::ERROR,
+            ))],
+            SummaryState::Idle => Vec::new(),
+        }
+    }
+
+    fn content_paragraph(&self, spinner: char) -> Paragraph<'static> {
+        Paragraph::new(self.content_lines(spinner)).wrap(Wrap { trim: false })
     }
 
     #[cfg(not(target_os = "android"))]
@@ -188,38 +255,12 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
     let content_area = layout[0];
     let hint_area = layout[1];
-    let lines = match overlay.state {
-        SummaryState::Loading if overlay.reasoning.is_empty() => vec![Line::from(Span::styled(
-            format!("Waiting for LLM response {spinner}"),
-            theme::HINT,
-        ))],
-        SummaryState::Loading => reasoning_lines(&overlay.reasoning, spinner),
-        SummaryState::Streaming if overlay.summary.is_empty() => {
-            reasoning_lines(&overlay.reasoning, spinner)
-        }
-        SummaryState::Streaming => {
-            let mut lines = markdown::render_markdown(&overlay.summary);
-            lines.push(Line::from(Span::styled(spinner.to_string(), theme::HINT)));
-            lines
-        }
-        SummaryState::Done => markdown::render_markdown(&overlay.summary),
-        SummaryState::Error => vec![Line::from(Span::styled(
-            overlay
-                .error
-                .as_deref()
-                .unwrap_or("Unknown error")
-                .to_string(),
-            theme::ERROR,
-        ))],
-        SummaryState::Idle => Vec::new(),
-    };
-
     frame.render_widget(Clear, popup);
     frame.render_widget(block.style(theme::POPUP), popup);
     frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((overlay.scroll_offset as u16, 0))
+        overlay
+            .content_paragraph(spinner)
+            .scroll((overlay.render_scroll_offset(), 0))
             .style(theme::POPUP),
         content_area,
     );
@@ -251,11 +292,11 @@ pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
     ))
 }
 
-pub(crate) fn content_height(area: Rect) -> Option<usize> {
+pub(crate) fn content_area(area: Rect) -> Option<Rect> {
     let popup = popup_rect(area)?;
     let inner = Block::default().borders(Borders::ALL).inner(popup);
     let layout = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
-    Some(layout[0].height as usize)
+    Some(layout[0])
 }
 
 fn reasoning_lines(buffer: &str, spinner: char) -> Vec<Line<'static>> {
@@ -350,5 +391,59 @@ mod tests {
              ---\n\n\
              # Summary"
         );
+    }
+
+    fn completed_overlay(summary: &str) -> SummaryOverlay {
+        let mut overlay = SummaryOverlay::default();
+        overlay.begin(&story(), 2);
+        overlay.handle_event(SummaryEvent::Chunk {
+            content: summary.to_string(),
+            reasoning: String::new(),
+        });
+        overlay.handle_event(SummaryEvent::Complete);
+        overlay
+    }
+
+    #[test]
+    fn scrolling_stops_when_the_last_wrapped_line_reaches_the_viewport_bottom() {
+        let mut overlay = completed_overlay("one\n\ntwo\n\nthree\n\nfour");
+        overlay.set_viewport(40, 3);
+
+        overlay.scroll_down(usize::MAX);
+
+        assert_eq!(overlay.wrapped_line_count(), 7);
+        assert_eq!(overlay.scroll_offset(), 4);
+    }
+
+    #[test]
+    fn viewport_resize_reflows_content_and_reclamps_the_offset() {
+        let mut overlay = completed_overlay("11111 22222 33333");
+        overlay.set_viewport(5, 1);
+        overlay.scroll_down(usize::MAX);
+        assert_eq!(overlay.scroll_offset(), 2);
+
+        overlay.set_viewport(80, 1);
+
+        assert_eq!(overlay.wrapped_line_count(), 1);
+        assert_eq!(overlay.scroll_offset(), 0);
+
+        let mut overlay = completed_overlay("one\n\ntwo\n\nthree\n\nfour");
+        overlay.set_viewport(40, 2);
+        overlay.scroll_down(usize::MAX);
+        assert_eq!(overlay.scroll_offset(), 5);
+
+        overlay.set_viewport(40, 6);
+
+        assert_eq!(overlay.scroll_offset(), 1);
+    }
+
+    #[test]
+    fn content_shorter_than_the_viewport_does_not_scroll() {
+        let mut overlay = completed_overlay("short");
+        overlay.set_viewport(40, 5);
+
+        overlay.scroll_down(usize::MAX);
+
+        assert_eq!(overlay.scroll_offset(), 0);
     }
 }
