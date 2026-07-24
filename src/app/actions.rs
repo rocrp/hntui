@@ -7,10 +7,6 @@ use crossterm::event::KeyEventKind;
 use std::time::Instant;
 
 impl App {
-    fn open_help(&mut self) {
-        self.help_overlay.open();
-    }
-
     pub(crate) fn input_layer(&self) -> InputLayer {
         if self.help_overlay.is_visible() {
             InputLayer::Help
@@ -76,7 +72,7 @@ impl App {
                             self.last_error = Some(format!("clipboard: {error:#}"));
                         }
                     }
-                    SummaryAction::OpenHelp => self.open_help(),
+                    SummaryAction::OpenHelp => self.help_overlay.open(),
                 }
                 return;
             }
@@ -100,7 +96,7 @@ impl App {
         }
 
         match (self.view, action) {
-            (_, Action::OpenHelp) => self.open_help(),
+            (_, Action::OpenHelp) => self.help_overlay.open(),
             (View::Stories, Action::BackOrQuit) if self.search_active => {
                 self.exit_search_mode();
             }

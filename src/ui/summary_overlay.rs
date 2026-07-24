@@ -1,6 +1,6 @@
 use crate::api::types::Story;
 use crate::summarizer::SummaryEvent;
-use crate::ui::{markdown, theme};
+use crate::ui::{clamped_scroll::ClampedScroll, markdown, theme};
 #[cfg(not(target_os = "android"))]
 use anyhow::Context;
 use anyhow::Result;
@@ -27,11 +27,9 @@ pub struct SummaryOverlay {
     state: SummaryState,
     summary: String,
     error: Option<String>,
-    scroll_offset: usize,
+    scroll: ClampedScroll,
     comment_count: usize,
     viewport_width: u16,
-    viewport_height: usize,
-    wrapped_line_count: usize,
     reasoning: String,
     content_started: bool,
     model_name: String,
@@ -49,7 +47,7 @@ impl SummaryOverlay {
         self.state = SummaryState::Loading;
         self.summary.clear();
         self.error = None;
-        self.scroll_offset = 0;
+        self.scroll.go_top();
         self.comment_count = comment_count;
         self.reasoning.clear();
         self.content_started = false;
@@ -77,7 +75,7 @@ impl SummaryOverlay {
                 if !content.is_empty() {
                     if !self.content_started {
                         self.content_started = true;
-                        self.scroll_offset = 0;
+                        self.scroll.go_top();
                     }
                     self.summary.push_str(&content);
                     if self.state == SummaryState::Loading {
@@ -101,57 +99,54 @@ impl SummaryOverlay {
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(amount);
-        self.clamp_scroll();
+        self.scroll.scroll_down(amount);
+        self.pin_reasoning_to_tail();
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
-        self.clamp_scroll();
+        self.scroll.scroll_up(amount);
+        self.pin_reasoning_to_tail();
     }
 
     pub fn go_top(&mut self) {
-        self.scroll_offset = 0;
-        self.clamp_scroll();
+        self.scroll.go_top();
+        self.pin_reasoning_to_tail();
     }
 
     pub fn go_bottom(&mut self) {
-        self.scroll_offset = self.max_scroll_offset();
+        self.scroll.go_bottom();
     }
 
     pub fn set_viewport(&mut self, width: u16, height: u16) {
         self.viewport_width = width;
-        self.viewport_height = usize::from(height);
+        self.scroll.set_viewport_height(usize::from(height));
         self.reflow();
     }
 
     pub fn page_scroll_amount(&self) -> usize {
-        self.viewport_height.saturating_sub(2).max(1)
+        self.scroll.page_amount()
     }
 
     pub fn scroll_offset(&self) -> usize {
-        self.scroll_offset
+        self.scroll.offset()
     }
 
     pub fn wrapped_line_count(&self) -> usize {
-        self.wrapped_line_count
+        self.scroll.content_height()
     }
 
     fn max_scroll_offset(&self) -> usize {
-        self.wrapped_line_count()
-            .saturating_sub(self.viewport_height)
+        self.scroll.max_offset()
     }
 
     fn content_overflows_viewport(&self) -> bool {
-        self.wrapped_line_count() > self.viewport_height
+        self.wrapped_line_count() > self.scroll.viewport_height()
     }
 
-    fn clamp_scroll(&mut self) {
-        self.scroll_offset = if self.is_reasoning_phase() {
-            self.max_scroll_offset()
-        } else {
-            self.scroll_offset.min(self.max_scroll_offset())
-        };
+    fn pin_reasoning_to_tail(&mut self) {
+        if self.is_reasoning_phase() {
+            self.scroll.go_bottom();
+        }
     }
 
     fn is_reasoning_phase(&self) -> bool {
@@ -160,14 +155,13 @@ impl SummaryOverlay {
     }
 
     fn reflow(&mut self) {
-        self.wrapped_line_count = self.content_paragraph(' ').line_count(self.viewport_width);
-        self.clamp_scroll();
+        let wrapped_line_count = self.content_paragraph(' ').line_count(self.viewport_width);
+        self.scroll.set_content_height(wrapped_line_count);
+        self.pin_reasoning_to_tail();
     }
 
     fn render_scroll_offset(&self) -> u16 {
-        self.scroll_offset()
-            .try_into()
-            .expect("clamped summary scroll offset exceeds ratatui's u16 limit")
+        self.scroll.render_offset()
     }
 
     pub fn state(&self) -> SummaryState {
@@ -297,7 +291,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
         let mut scrollbar_state =
             ScrollbarState::new(overlay.max_scroll_offset().saturating_add(1))
                 .position(overlay.scroll_offset())
-                .viewport_content_length(overlay.viewport_height);
+                .viewport_content_length(overlay.scroll.viewport_height());
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             content_area,

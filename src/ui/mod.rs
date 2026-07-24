@@ -1,3 +1,4 @@
+mod clamped_scroll;
 pub mod comment_layout;
 pub mod comment_view;
 pub mod feed_filter;

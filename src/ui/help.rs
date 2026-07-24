@@ -1,5 +1,5 @@
 use crate::app::{App, View};
-use crate::ui::theme;
+use crate::ui::{clamped_scroll::ClampedScroll, theme};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -8,15 +8,13 @@ use ratatui::Frame;
 #[derive(Default)]
 pub struct HelpOverlay {
     visible: bool,
-    scroll_offset: usize,
-    viewport_height: usize,
-    wrapped_line_count: usize,
+    scroll: ClampedScroll,
 }
 
 impl HelpOverlay {
     pub fn open(&mut self) {
         self.visible = true;
-        self.scroll_offset = 0;
+        self.scroll.go_top();
     }
 
     pub fn dismiss(&mut self) {
@@ -29,53 +27,39 @@ impl HelpOverlay {
 
     pub fn set_frame(&mut self, area: Rect, active: View, summary_active: bool) {
         let Some(popup) = popup_rect(area, active, summary_active) else {
-            self.viewport_height = 0;
-            self.wrapped_line_count = 0;
-            self.clamp_scroll();
+            self.scroll.set_extents(0, 0);
             return;
         };
         let inner = Block::default().borders(Borders::ALL).inner(popup);
-        self.viewport_height = usize::from(inner.height);
-        self.wrapped_line_count = content_paragraph(active, summary_active).line_count(inner.width);
-        self.clamp_scroll();
+        let wrapped_line_count = content_paragraph(active, summary_active).line_count(inner.width);
+        self.scroll
+            .set_extents(wrapped_line_count, usize::from(inner.height));
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(amount);
-        self.clamp_scroll();
+        self.scroll.scroll_down(amount);
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
-        self.clamp_scroll();
+        self.scroll.scroll_up(amount);
     }
 
     pub fn page_scroll_amount(&self) -> usize {
-        self.viewport_height.saturating_sub(2).max(1)
+        self.scroll.page_amount()
     }
 
     #[cfg(test)]
     pub fn scroll_offset(&self) -> usize {
-        self.scroll_offset
+        self.scroll.offset()
     }
 
     #[cfg(test)]
     fn wrapped_line_count(&self) -> usize {
-        self.wrapped_line_count
-    }
-
-    fn max_scroll_offset(&self) -> usize {
-        self.wrapped_line_count.saturating_sub(self.viewport_height)
-    }
-
-    fn clamp_scroll(&mut self) {
-        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset());
+        self.scroll.content_height()
     }
 
     fn render_scroll_offset(&self) -> u16 {
-        self.scroll_offset
-            .try_into()
-            .expect("clamped help scroll offset exceeds ratatui's u16 limit")
+        self.scroll.render_offset()
     }
 }
 
