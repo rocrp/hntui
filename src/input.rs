@@ -200,6 +200,24 @@ mod routing_tests {
     }
 
     #[test]
+    fn pending_g_does_not_cross_input_layers() {
+        let mut keys = KeyState::default();
+
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::View, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::View, key(KeyCode::Char('g'))),
+            Action::GoTop
+        );
+    }
+
+    #[test]
     fn help_scroll_keys_route_to_help_actions() {
         let cases = [
             (
@@ -265,13 +283,13 @@ pub enum Action {
 
 #[derive(Debug, Default)]
 pub struct KeyState {
-    pending_g: bool,
+    pending_g_layer: Option<InputLayer>,
 }
 
 impl KeyState {
     pub fn on_key(&mut self, layer: InputLayer, key: KeyEvent) -> Action {
         if !matches!(layer, InputLayer::Summary | InputLayer::View) {
-            self.pending_g = false;
+            self.pending_g_layer = None;
         }
         match layer {
             InputLayer::Help => match (key.code, key.modifiers) {
@@ -328,7 +346,11 @@ impl KeyState {
     }
 
     fn summary_action(&mut self, key: KeyEvent) -> Action {
-        if let Some(action) = self.g_sequence_action(key, Action::Summary(SummaryAction::GoTop)) {
+        if let Some(action) = self.g_sequence_action(
+            InputLayer::Summary,
+            key,
+            Action::Summary(SummaryAction::GoTop),
+        ) {
             return action;
         }
 
@@ -355,7 +377,7 @@ impl KeyState {
     }
 
     fn view_action(&mut self, key: KeyEvent) -> Action {
-        if let Some(action) = self.g_sequence_action(key, Action::GoTop) {
+        if let Some(action) = self.g_sequence_action(InputLayer::View, key, Action::GoTop) {
             return action;
         }
 
@@ -391,20 +413,25 @@ impl KeyState {
         }
     }
 
-    fn g_sequence_action(&mut self, key: KeyEvent, go_top: Action) -> Option<Action> {
+    fn g_sequence_action(
+        &mut self,
+        layer: InputLayer,
+        key: KeyEvent,
+        go_top: Action,
+    ) -> Option<Action> {
         if !matches!(
             (key.code, key.modifiers),
             (KeyCode::Char('g'), KeyModifiers::NONE)
         ) {
-            self.pending_g = false;
+            self.pending_g_layer = None;
             return None;
         }
 
-        if self.pending_g {
-            self.pending_g = false;
+        if self.pending_g_layer == Some(layer) {
+            self.pending_g_layer = None;
             return Some(go_top);
         }
-        self.pending_g = true;
+        self.pending_g_layer = Some(layer);
         Some(Action::Noop)
     }
 }

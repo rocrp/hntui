@@ -9,11 +9,10 @@ use std::time::Instant;
 impl App {
     fn open_help(&mut self) {
         self.help_overlay.open();
-        self.help_visible = true;
     }
 
     pub(crate) fn input_layer(&self) -> InputLayer {
-        if self.help_visible {
+        if self.help_overlay.is_visible() {
             InputLayer::Help
         } else if self.summary_overlay.is_visible() {
             InputLayer::Summary
@@ -40,7 +39,7 @@ impl App {
             Action::Noop => return,
             Action::Help(action) => {
                 match action {
-                    HelpAction::Dismiss => self.help_visible = false,
+                    HelpAction::Dismiss => self.help_overlay.dismiss(),
                     HelpAction::ScrollDown(amount) => self.help_overlay.scroll_down(amount),
                     HelpAction::ScrollUp(amount) => self.help_overlay.scroll_up(amount),
                     HelpAction::PageDown => {

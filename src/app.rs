@@ -114,7 +114,6 @@ const PREFETCH_LOOKAHEAD: usize = 5;
 
 pub struct App {
     pub view: View,
-    pub help_visible: bool,
     pub help_overlay: HelpOverlay,
     pub stories: Vec<Story>,
     pub story_ids: Vec<u64>,
@@ -184,7 +183,6 @@ impl App {
 
         Self {
             view: View::Stories,
-            help_visible: false,
             help_overlay: HelpOverlay::default(),
             stories: vec![],
             story_ids: vec![],
@@ -286,7 +284,8 @@ impl App {
             self.summary_overlay
                 .set_viewport(viewport.width, viewport.height);
         }
-        self.help_overlay.set_frame(area, self.view);
+        self.help_overlay
+            .set_frame(area, self.view, self.summary_overlay.is_visible());
 
         match self.view {
             View::Stories => {

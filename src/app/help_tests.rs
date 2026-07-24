@@ -50,10 +50,10 @@ fn help_mouse_wheel_scrolls_while_a_left_click_dismisses() {
         modifiers: KeyModifiers::NONE,
     });
 
-    assert!(app.help_visible);
+    assert!(app.help_overlay.is_visible());
     assert_eq!(app.help_overlay.scroll_offset(), 3);
 
     app.handle_mouse(left_click(1, 1));
 
-    assert!(!app.help_visible);
+    assert!(!app.help_overlay.is_visible());
 }
