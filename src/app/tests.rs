@@ -68,6 +68,23 @@ fn left_click(column: u16, row: u16) -> MouseEvent {
     }
 }
 
+fn app_with_scrollable_summary() -> App {
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
+    let summarizer = Summarizer::new(None, None, reqwest::Client::new());
+    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    app.summary_overlay.begin(&story(1), 0);
+    app.summary_overlay.handle_event(SummaryEvent::Chunk {
+        content: "one\n\ntwo\n\nthree\n\nfour".to_string(),
+        reasoning: String::new(),
+    });
+    app.summary_overlay.handle_event(SummaryEvent::Complete);
+    app.summary_overlay.set_viewport(40, 3);
+    app
+}
+
 #[tokio::test]
 async fn refresh_loads_initial_stories_through_the_app_event_seam() {
     let source = Arc::new(InMemorySource::new(vec![story(1), story(2)]));
@@ -300,6 +317,26 @@ fn summary_copy_failure_is_surfaced_on_the_app() {
         app.last_error.as_deref(),
         Some("clipboard: summary is empty")
     );
+}
+
+#[test]
+fn summary_go_bottom_action_lands_the_last_line_at_the_viewport_bottom() {
+    let mut app = app_with_scrollable_summary();
+
+    app.handle_action(Action::Summary(SummaryAction::GoBottom));
+
+    assert_eq!(app.summary_overlay.scroll_offset(), 4);
+}
+
+#[test]
+fn summary_go_top_action_returns_to_the_first_line() {
+    let mut app = app_with_scrollable_summary();
+    app.summary_overlay.scroll_down(usize::MAX);
+    assert_eq!(app.summary_overlay.scroll_offset(), 4);
+
+    app.handle_action(Action::Summary(SummaryAction::GoTop));
+
+    assert_eq!(app.summary_overlay.scroll_offset(), 0);
 }
 
 #[tokio::test]

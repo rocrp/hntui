@@ -64,6 +64,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     lines.push(kv("r", "refresh"));
     lines.push(kv(",", "settings"));
     lines.push(kv("q / Esc", "back"));
+    lines.push(Line::raw(""));
+
+    lines.push(section_title("Summary", app.summary_overlay.is_visible()));
+    lines.push(kv("gg, G", "top / bottom"));
 
     let desired_width = area.width.min(76);
     let desired_height = (lines.len() as u16).saturating_add(2).min(area.height);

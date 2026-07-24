@@ -53,6 +53,8 @@ impl App {
                         let amount = self.summary_overlay.page_scroll_amount();
                         self.summary_overlay.scroll_up(amount);
                     }
+                    SummaryAction::GoTop => self.summary_overlay.go_top(),
+                    SummaryAction::GoBottom => self.summary_overlay.go_bottom(),
                     SummaryAction::Copy => {
                         if let Err(error) = self.summary_overlay.copy_summary() {
                             self.last_error = Some(format!("clipboard: {error:#}"));

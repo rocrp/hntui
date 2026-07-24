@@ -110,6 +110,14 @@ impl SummaryOverlay {
         self.clamp_scroll();
     }
 
+    pub fn go_top(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn go_bottom(&mut self) {
+        self.scroll_offset = self.max_scroll_offset();
+    }
+
     pub fn set_viewport(&mut self, width: u16, height: u16) {
         self.viewport_width = width;
         self.viewport_height = usize::from(height);

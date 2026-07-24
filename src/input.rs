@@ -24,6 +24,8 @@ pub enum SummaryAction {
     ScrollUp(usize),
     PageDown,
     PageUp,
+    GoTop,
+    GoBottom,
     Copy,
     OpenHelp,
 }
@@ -148,6 +150,50 @@ mod routing_tests {
             Action::Settings(SettingsAction::Edit(TextAction::Insert('界')))
         );
     }
+
+    #[test]
+    fn uppercase_g_routes_to_summary_bottom() {
+        assert_eq!(
+            KeyState::default().on_key(InputLayer::Summary, key(KeyCode::Char('G'))),
+            Action::Summary(SummaryAction::GoBottom)
+        );
+    }
+
+    #[test]
+    fn double_g_routes_to_summary_top() {
+        let mut keys = KeyState::default();
+
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Summary(SummaryAction::GoTop)
+        );
+    }
+
+    #[test]
+    fn non_g_summary_key_executes_normally_and_cancels_pending_g() {
+        let mut keys = KeyState::default();
+
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('j'))),
+            Action::Summary(SummaryAction::ScrollDown(1))
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Summary(SummaryAction::GoTop)
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,7 +238,7 @@ pub struct KeyState {
 
 impl KeyState {
     pub fn on_key(&mut self, layer: InputLayer, key: KeyEvent) -> Action {
-        if layer != InputLayer::View {
+        if !matches!(layer, InputLayer::Summary | InputLayer::View) {
             self.pending_g = false;
         }
         match layer {
@@ -203,28 +249,7 @@ impl KeyState {
                 | (KeyCode::Char('c'), KeyModifiers::CONTROL) => Action::Help(HelpAction::Dismiss),
                 _ => Action::Noop,
             },
-            InputLayer::Summary => match (key.code, key.modifiers) {
-                (KeyCode::Esc, _)
-                | (KeyCode::Char('q'), KeyModifiers::NONE)
-                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    Action::Summary(SummaryAction::Dismiss)
-                }
-                (KeyCode::Char('?'), _) => Action::Summary(SummaryAction::OpenHelp),
-                (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
-                    Action::Summary(SummaryAction::ScrollDown(1))
-                }
-                (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
-                    Action::Summary(SummaryAction::ScrollUp(1))
-                }
-                (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                    Action::Summary(SummaryAction::PageDown)
-                }
-                (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                    Action::Summary(SummaryAction::PageUp)
-                }
-                (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Summary(SummaryAction::Copy),
-                _ => Action::Noop,
-            },
+            InputLayer::Summary => self.summary_action(key),
             InputLayer::FeedFilter => match (key.code, key.modifiers) {
                 (KeyCode::Esc, _) => Action::FeedFilter(FeedFilterAction::Dismiss),
                 (KeyCode::Enter, _) => Action::FeedFilter(FeedFilterAction::Select),
@@ -262,20 +287,38 @@ impl KeyState {
         }
     }
 
-    fn view_action(&mut self, key: KeyEvent) -> Action {
-        if matches!(
-            (key.code, key.modifiers),
-            (KeyCode::Char('g'), KeyModifiers::NONE)
-        ) {
-            if self.pending_g {
-                self.pending_g = false;
-                return Action::GoTop;
-            }
-            self.pending_g = true;
-            return Action::Noop;
+    fn summary_action(&mut self, key: KeyEvent) -> Action {
+        if let Some(action) = self.g_sequence_action(key, Action::Summary(SummaryAction::GoTop)) {
+            return action;
         }
 
-        self.pending_g = false;
+        match (key.code, key.modifiers) {
+            (KeyCode::Esc, _)
+            | (KeyCode::Char('q'), KeyModifiers::NONE)
+            | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                Action::Summary(SummaryAction::Dismiss)
+            }
+            (KeyCode::Char('?'), _) => Action::Summary(SummaryAction::OpenHelp),
+            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
+                Action::Summary(SummaryAction::ScrollDown(1))
+            }
+            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
+                Action::Summary(SummaryAction::ScrollUp(1))
+            }
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Summary(SummaryAction::PageDown),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => Action::Summary(SummaryAction::PageUp),
+            (KeyCode::Char('G'), KeyModifiers::SHIFT)
+            | (KeyCode::Char('G'), KeyModifiers::NONE) => Action::Summary(SummaryAction::GoBottom),
+            (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Summary(SummaryAction::Copy),
+            _ => Action::Noop,
+        }
+    }
+
+    fn view_action(&mut self, key: KeyEvent) -> Action {
+        if let Some(action) = self.g_sequence_action(key, Action::GoTop) {
+            return action;
+        }
+
         match (key.code, key.modifiers) {
             (KeyCode::Char('?'), _) => Action::OpenHelp,
             (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => Action::MoveDown,
@@ -306,6 +349,23 @@ impl KeyState {
             (KeyCode::Char(','), KeyModifiers::NONE) => Action::OpenSettings,
             _ => Action::Noop,
         }
+    }
+
+    fn g_sequence_action(&mut self, key: KeyEvent, go_top: Action) -> Option<Action> {
+        if !matches!(
+            (key.code, key.modifiers),
+            (KeyCode::Char('g'), KeyModifiers::NONE)
+        ) {
+            self.pending_g = false;
+            return None;
+        }
+
+        if self.pending_g {
+            self.pending_g = false;
+            return Some(go_top);
+        }
+        self.pending_g = true;
+        Some(Action::Noop)
     }
 }
 
