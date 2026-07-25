@@ -35,6 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `f` | Filter feed |
 | `/` | Search |
 | `s` | Summarize (requires LLM key) |
+| `v` | View article (requires localwebrs) |
 | `r` | Refresh |
 | `,` | Settings |
 | `?` | Help |
@@ -52,9 +53,21 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `o` / `O` | Open HN / source link |
 | `y` | Copy selected comment |
 | `s` | Summarize (requires LLM key) |
+| `v` | View article (requires localwebrs) |
 | `r` | Refresh |
 | `,` | Settings |
 | `q`, `Esc` | Back |
+
+**Article** (`v`)
+
+| Key | Action |
+|-----|--------|
+| `j/k`, `↓/↑` | Scroll |
+| `gg` / `G` | Top / bottom |
+| `Ctrl+d/u`, `PgDn/PgUp` | Page down / up |
+| `c` | Copy article to clipboard |
+| `o` | Open the original (browser) |
+| `q`, `Esc` | Close (cancels a running fetch) |
 
 **Touch / Mouse** (Termux, etc.)
 
@@ -105,3 +118,27 @@ Optional `base_url` overrides the provider's default endpoint.
 
 `hntui` auto-loads `~/.env.smolllm` if it exists (process env always wins).
 Pass `--env-file <path>` to load a different file explicitly.
+
+### Articles (`config.toml`)
+
+Press `v` on any story to read the linked page as text — or the post's own body
+for an Ask HN. Article text also grounds the summary by default.
+
+Both need [localwebrs](https://github.com/rocrp/localwebrs) on your `PATH`:
+
+```bash
+cargo install --git https://github.com/rocrp/localwebrs
+```
+
+```toml
+[summarize]
+include_article = true    # feed the article to the summarizer (default)
+max_article_chars = 20000 # head-truncated at this many characters
+
+[article]
+bin = "localwebrs"        # override if it is not on PATH
+```
+
+Without localwebrs, `hntui` works as before: `v` reports the missing binary, and
+`s` summarizes the comments alone with a banner saying the article was skipped.
+Self-posts need no subprocess at all.

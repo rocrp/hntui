@@ -1,4 +1,4 @@
-use super::{CommentNode, FeedKind, HnClient, SearchClient, Story};
+use super::{CommentNode, FeedKind, HnClient, SearchClient, Story, StoryThread};
 use anyhow::Result;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub trait StorySource: Send + Sync {
         page_size: usize,
     ) -> BoxFuture<'static, Result<Vec<Story>>>;
 
-    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<Vec<CommentNode>>>;
+    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<StoryThread>>;
 
     fn comment_children(
         &self,
@@ -68,7 +68,7 @@ impl StorySource for HnClient {
         })
     }
 
-    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<Vec<CommentNode>>> {
+    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<StoryThread>> {
         let source = self.clone();
         Box::pin(async move { source.fetch_comment_roots(&story).await })
     }
@@ -95,6 +95,7 @@ impl SearchSource for SearchClient {
 pub struct InMemorySource {
     stories: Vec<Story>,
     comments: std::collections::HashMap<u64, Vec<CommentNode>>,
+    thread_texts: std::collections::HashMap<u64, String>,
     children: std::collections::HashMap<u64, CommentNode>,
     searches: std::collections::HashMap<String, Vec<Story>>,
     initial_error: Option<String>,
@@ -111,6 +112,13 @@ impl InMemorySource {
 
     pub fn with_comments(mut self, story_id: u64, comments: Vec<CommentNode>) -> Self {
         self.comments.insert(story_id, comments);
+        self
+    }
+
+    /// Mimic a backend that only reports the self-post body alongside the
+    /// discussion (the hackerweb `/item/:id` shape).
+    pub fn with_thread_text(mut self, story_id: u64, text: impl Into<String>) -> Self {
+        self.thread_texts.insert(story_id, text.into());
         self
     }
 
@@ -167,9 +175,10 @@ impl StorySource for InMemorySource {
         Box::pin(async move { Ok(stories) })
     }
 
-    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<Vec<CommentNode>>> {
+    fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<StoryThread>> {
         let comments = self.comments.get(&story.id).cloned().unwrap_or_default();
-        Box::pin(async move { Ok(comments) })
+        let text = self.thread_texts.get(&story.id).cloned();
+        Box::pin(async move { Ok(StoryThread { text, comments }) })
     }
 
     fn comment_children(

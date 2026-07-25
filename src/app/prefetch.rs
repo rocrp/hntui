@@ -2,7 +2,7 @@ use super::{
     App, AppEvent, CommentLoadKind, StoriesLoadMode, TaskTarget, View, IDLE_PREFETCH_DELAY,
     MAX_COMMENT_PREFETCH_IN_FLIGHT, PREFETCH_LOOKAHEAD,
 };
-use crate::api::types::{CommentNode, Story};
+use crate::api::types::{Story, StoryThread};
 use crate::logging;
 use std::collections::HashMap;
 
@@ -192,17 +192,17 @@ impl App {
         self.tasks.spawn(
             TaskTarget::CommentRoots(story_id),
             async move { source.comment_roots(story).await },
-            move |task, comments| AppEvent::CommentsLoaded {
+            move |task, thread| AppEvent::CommentsLoaded {
                 task,
                 kind: CommentLoadKind::Prefetch,
-                comments,
+                thread,
             },
         );
     }
 }
 
 pub(crate) struct PrefetchCache {
-    entries: HashMap<u64, Vec<CommentNode>>,
+    entries: HashMap<u64, StoryThread>,
     order: Vec<u64>,
     capacity: usize,
 }
@@ -221,12 +221,18 @@ impl PrefetchCache {
         self.entries.contains_key(&story_id)
     }
 
+    /// Read a cached thread without consuming it — the Article path wants only
+    /// the self-post body, and the comments must stay available for the view.
+    pub(crate) fn peek(&self, story_id: u64) -> Option<&StoryThread> {
+        self.entries.get(&story_id)
+    }
+
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.order.clear();
     }
 
-    pub(crate) fn remove(&mut self, story_id: u64) -> Option<Vec<CommentNode>> {
+    pub(crate) fn remove(&mut self, story_id: u64) -> Option<StoryThread> {
         self.order.retain(|id| *id != story_id);
         self.entries.remove(&story_id)
     }
@@ -253,7 +259,7 @@ impl PrefetchCache {
     pub(crate) fn insert(
         &mut self,
         story_id: u64,
-        comments: Vec<CommentNode>,
+        thread: StoryThread,
         stories: &[Story],
         selected: usize,
     ) {
@@ -267,7 +273,7 @@ impl PrefetchCache {
 
         self.order.retain(|id| *id != story_id);
         self.order.push(story_id);
-        self.entries.insert(story_id, comments);
+        self.entries.insert(story_id, thread);
     }
 
     fn furthest_cached_id(&self, stories: &[Story], selected: usize) -> Option<u64> {
@@ -306,6 +312,7 @@ mod tests {
             id,
             title: format!("story {id}"),
             url: None,
+            text: None,
             score,
             by: "alice".to_string(),
             time: 1,
@@ -333,9 +340,9 @@ mod tests {
         let stories = stories(&[1, 2, 3]);
         let mut cache = PrefetchCache::new(2);
 
-        cache.insert(1, Vec::new(), &stories, 0);
-        cache.insert(3, Vec::new(), &stories, 0);
-        cache.insert(2, Vec::new(), &stories, 0);
+        cache.insert(1, StoryThread::default(), &stories, 0);
+        cache.insert(3, StoryThread::default(), &stories, 0);
+        cache.insert(2, StoryThread::default(), &stories, 0);
 
         assert!(cache.contains(1));
         assert!(cache.contains(2));
@@ -347,8 +354,8 @@ mod tests {
         let stories = stories(&[1, 2, 3, 4]);
         let mut cache = PrefetchCache::new(2);
 
-        cache.insert(1, Vec::new(), &stories, 2);
-        cache.insert(4, Vec::new(), &stories, 2);
+        cache.insert(1, StoryThread::default(), &stories, 2);
+        cache.insert(4, StoryThread::default(), &stories, 2);
 
         assert_eq!(cache.max_cached_distance_when_full(&stories, 2), Some(2));
     }
@@ -358,10 +365,10 @@ mod tests {
         let stories = stories(&[1, 2, 3]);
         let mut cache = PrefetchCache::new(2);
 
-        cache.insert(1, Vec::new(), &stories, 0);
+        cache.insert(1, StoryThread::default(), &stories, 0);
         assert!(cache.remove(1).is_some());
-        cache.insert(2, Vec::new(), &stories, 0);
-        cache.insert(3, Vec::new(), &stories, 0);
+        cache.insert(2, StoryThread::default(), &stories, 0);
+        cache.insert(3, StoryThread::default(), &stories, 0);
 
         assert_eq!(cache.entries.len(), 2);
         assert!(!cache.contains(1));

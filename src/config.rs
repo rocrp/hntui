@@ -11,6 +11,14 @@ pub struct Config {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 struct StoredConfig {
     summarize: Option<SummarizeConfig>,
+    article: Option<ArticleConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ArticleConfig {
+    /// localwebrs executable; resolved through PATH when it is a bare name.
+    #[serde(default = "default_article_bin")]
+    pub bin: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -22,6 +30,12 @@ pub struct SummarizeConfig {
     pub base_url: Option<String>,
     #[serde(default = "default_max_comments")]
     pub max_comments: usize,
+    /// Feed the story's Article to the model alongside the discussion.
+    #[serde(default = "default_include_article")]
+    pub include_article: bool,
+    /// Head-truncation ceiling for the Article section of the prompt.
+    #[serde(default = "default_max_article_chars")]
+    pub max_article_chars: usize,
     #[serde(default = "default_system_prompt")]
     pub system_prompt: String,
 }
@@ -59,13 +73,27 @@ impl EffectiveValue {
     }
 }
 
-fn default_max_comments() -> usize {
+pub(crate) fn default_max_comments() -> usize {
     200
+}
+
+fn default_article_bin() -> String {
+    "localwebrs".to_string()
+}
+
+pub(crate) fn default_include_article() -> bool {
+    true
+}
+
+pub(crate) fn default_max_article_chars() -> usize {
+    20_000
 }
 
 pub(crate) fn default_system_prompt() -> String {
     "Summarize this Hacker News discussion concisely. \
-     Highlight key arguments, disagreements, and consensus points."
+     Highlight key arguments, disagreements, and consensus points. \
+     When article content is provided, ground the summary in it: say what the \
+     article claims before what commenters make of it."
         .to_string()
 }
 
@@ -74,6 +102,17 @@ impl Config {
     pub(crate) fn for_test(path: PathBuf) -> Self {
         Self {
             stored: StoredConfig::default(),
+            path,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_with_summarize(path: PathBuf, summarize: SummarizeConfig) -> Self {
+        Self {
+            stored: StoredConfig {
+                summarize: Some(summarize),
+                article: None,
+            },
             path,
         }
     }
@@ -109,6 +148,14 @@ impl Config {
 
     pub fn summarize(&self) -> Option<&SummarizeConfig> {
         self.stored.summarize.as_ref()
+    }
+
+    pub fn article_bin(&self) -> String {
+        self.stored
+            .article
+            .as_ref()
+            .map(|article| article.bin.clone())
+            .unwrap_or_else(default_article_bin)
     }
 
     pub fn effective_api_key(&self) -> EffectiveValue {
@@ -169,6 +216,9 @@ impl Config {
         let next = Self {
             stored: StoredConfig {
                 summarize: Some(edits.summarize),
+                // The settings popup never edits [article]; carry it through
+                // so saving from the popup does not drop it.
+                article: self.stored.article.clone(),
             },
             path: self.path.clone(),
         };
@@ -359,6 +409,8 @@ mod tests {
                     api_key: None,
                     base_url: None,
                     max_comments: 50,
+                    include_article: true,
+                    max_article_chars: 20_000,
                     system_prompt: "Be terse".to_string(),
                 },
             })
@@ -428,6 +480,58 @@ mod tests {
         assert_eq!(provider_config.api_key_override(), None);
     }
 
+    #[test]
+    fn article_bin_defaults_to_path_lookup_and_honours_an_override() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bare = dir.path().join("bare.toml");
+        let overridden = dir.path().join("overridden.toml");
+        std::fs::write(&bare, "[summarize]\nmodel = \"openai/test\"\n").expect("write bare config");
+        std::fs::write(&overridden, "[article]\nbin = \"/opt/bin/localwebrs\"\n")
+            .expect("write overridden config");
+
+        let bare = Config::load_from(vec![bare.clone()], bare).expect("load bare config");
+        let overridden =
+            Config::load_from(vec![overridden.clone()], overridden).expect("load override config");
+
+        assert_eq!(bare.article_bin(), "localwebrs");
+        assert_eq!(overridden.article_bin(), "/opt/bin/localwebrs");
+    }
+
+    #[tokio::test]
+    async fn saving_settings_keeps_the_article_section() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[summarize]\nmodel = \"openai/old\"\n\n[article]\nbin = \"/opt/bin/localwebrs\"\n",
+        )
+        .expect("write config");
+        let config = Config::load_from(vec![path.clone()], path.clone()).expect("load config");
+
+        let saved = config
+            .save(ConfigEdits {
+                summarize: SummarizeConfig {
+                    model: "openai/new".to_string(),
+                    api_key: None,
+                    base_url: None,
+                    max_comments: 50,
+                    include_article: true,
+                    max_article_chars: 20_000,
+                    system_prompt: "Be terse".to_string(),
+                },
+            })
+            .await
+            .expect("save config");
+        let reloaded = Config::load_from(vec![path.clone()], path).expect("reload config");
+
+        assert_eq!(saved.article_bin(), "/opt/bin/localwebrs");
+        assert_eq!(reloaded.article_bin(), "/opt/bin/localwebrs");
+        assert_eq!(
+            reloaded.summarize().expect("summarize config").model,
+            "openai/new"
+        );
+    }
+
     #[tokio::test]
     async fn save_without_an_existing_file_uses_the_canonical_path() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -442,6 +546,8 @@ mod tests {
                     api_key: None,
                     base_url: None,
                     max_comments: 200,
+                    include_article: true,
+                    max_article_chars: 20_000,
                     system_prompt: "Summarize".to_string(),
                 },
             })

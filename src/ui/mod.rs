@@ -1,9 +1,11 @@
-mod clamped_scroll;
+pub mod article_overlay;
+pub(crate) mod clamped_scroll;
 pub mod comment_layout;
 pub mod comment_view;
 pub mod feed_filter;
 pub mod help;
 pub mod markdown;
+pub(crate) mod overlay;
 pub mod settings;
 pub mod story_list;
 pub mod summary_overlay;
@@ -46,6 +48,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         layer,
         InputLayer::Help
             | InputLayer::Summary
+            | InputLayer::Article
             | InputLayer::FeedFilter
             | InputLayer::Settings
             | InputLayer::SettingsEditor
@@ -58,6 +61,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         InputLayer::Help => help::render(frame, app),
         InputLayer::Summary => {
             summary_overlay::render(frame, &app.summary_overlay, app.spinner_frame());
+        }
+        InputLayer::Article => {
+            article_overlay::render(frame, &app.article_overlay, app.spinner_frame());
         }
         InputLayer::FeedFilter => feed_filter::render(frame, app),
         InputLayer::Settings | InputLayer::SettingsEditor => settings::render(frame, app),

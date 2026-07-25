@@ -2,7 +2,7 @@ use super::list_nav::rect_contains;
 use super::{App, View};
 use crate::api::FeedKind;
 use crate::input::{
-    Action, FeedFilterAction, HelpAction, InputLayer, SettingsAction, SummaryAction,
+    Action, ArticleAction, FeedFilterAction, HelpAction, InputLayer, SettingsAction, SummaryAction,
 };
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
@@ -31,6 +31,19 @@ impl App {
                         if popup.is_some_and(|popup| !rect_contains(popup, col, row)) =>
                     {
                         Action::Summary(SummaryAction::Dismiss)
+                    }
+                    _ => Action::Noop,
+                }
+            }
+            InputLayer::Article => {
+                let popup = crate::ui::article_overlay::popup_rect(self.layout_areas.frame_area);
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => Action::Article(ArticleAction::ScrollDown(3)),
+                    MouseEventKind::ScrollUp => Action::Article(ArticleAction::ScrollUp(3)),
+                    MouseEventKind::Down(MouseButton::Left)
+                        if popup.is_some_and(|popup| !rect_contains(popup, col, row)) =>
+                    {
+                        Action::Article(ArticleAction::Dismiss)
                     }
                     _ => Action::Noop,
                 }

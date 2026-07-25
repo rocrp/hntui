@@ -12,6 +12,8 @@ impl App {
             InputLayer::Help
         } else if self.summary_overlay.is_visible() {
             InputLayer::Summary
+        } else if self.article_overlay.is_visible() {
+            InputLayer::Article
         } else if let Some(settings) = &self.settings_popup {
             if settings.editing {
                 InputLayer::SettingsEditor
@@ -53,6 +55,9 @@ impl App {
                 match action {
                     SummaryAction::Dismiss => {
                         self.tasks.cancel(TaskTarget::Summary);
+                        // Also drop a summarize still gathering its inputs,
+                        // or it would spring back when they arrive.
+                        self.abandon_pending_summary();
                         self.summary_overlay.dismiss();
                     }
                     SummaryAction::ScrollDown(amount) => self.summary_overlay.scroll_down(amount),
@@ -74,6 +79,10 @@ impl App {
                     }
                     SummaryAction::OpenHelp => self.help_overlay.open(),
                 }
+                return;
+            }
+            Action::Article(action) => {
+                self.handle_article_action(action);
                 return;
             }
             Action::FeedFilter(action) => {
@@ -266,6 +275,16 @@ impl App {
             }
             (View::Stories, Action::Summarize) => {
                 self.summarize_selected_story();
+            }
+
+            (view, Action::ViewArticle) => {
+                let story = match view {
+                    View::Stories => self.selected_story().cloned(),
+                    View::Comments => self.current_story.clone(),
+                };
+                if let Some(story) = story {
+                    self.open_article_overlay(&story);
+                }
             }
 
             (_, Action::OpenSettings) => {

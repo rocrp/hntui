@@ -7,6 +7,7 @@ pub(super) fn story() -> Story {
         id: 42,
         title: "A story".to_string(),
         url: Some("https://example.com".to_string()),
+        text: None,
         score: 99,
         by: "alice".to_string(),
         time: 1_700_000_000,

@@ -122,3 +122,72 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn state_written_before_story_text_existed_still_loads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = StateStore::new(dir.path().to_path_buf());
+        // Exactly the shape shipped before Story gained `text`.
+        let legacy = r#"{
+            "saved_at": 1,
+            "story_ids": [1],
+            "stories": [{
+                "id": 1,
+                "title": "old",
+                "url": null,
+                "score": 10,
+                "by": "alice",
+                "time": 1,
+                "comment_count": 0,
+                "kids": []
+            }],
+            "feed": "top",
+            "seen_story_ids": []
+        }"#;
+        fs::write(dir.path().join("state.json"), legacy)
+            .await
+            .expect("write legacy state");
+
+        let state = store
+            .load_story_list_state()
+            .await
+            .expect("load legacy state")
+            .expect("legacy state present");
+
+        assert_eq!(state.stories[0].title, "old");
+        assert_eq!(state.stories[0].text, None);
+    }
+
+    #[tokio::test]
+    async fn a_saved_self_post_body_round_trips() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = StateStore::new(dir.path().to_path_buf());
+        let story = Story {
+            id: 1,
+            title: "Ask HN".to_string(),
+            url: None,
+            text: Some("<p>body".to_string()),
+            score: 10,
+            by: "alice".to_string(),
+            time: 1,
+            comment_count: 0,
+            kids: vec![],
+        };
+
+        store
+            .save_story_list_state(vec![1], vec![story], "ask".to_string(), vec![])
+            .await
+            .expect("save state");
+        let reloaded = store
+            .load_story_list_state()
+            .await
+            .expect("load state")
+            .expect("state present");
+
+        assert_eq!(reloaded.stories[0].text.as_deref(), Some("<p>body"));
+    }
+}

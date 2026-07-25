@@ -15,6 +15,7 @@ struct AlgoliaHit {
     object_id: String,
     title: Option<String>,
     url: Option<String>,
+    story_text: Option<String>,
     points: Option<i64>,
     author: Option<String>,
     #[serde(rename = "created_at_i")]
@@ -38,6 +39,7 @@ impl AlgoliaHit {
             id,
             title,
             url: self.url.filter(|u| !u.is_empty()),
+            text: self.story_text.filter(|text| !text.trim().is_empty()),
             score: self.points.unwrap_or(0),
             by: self.author.unwrap_or_default(),
             time: self.created_at_i.unwrap_or(0),
@@ -84,5 +86,32 @@ impl SearchClient {
         }
 
         Ok(stories)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn algolia_story_text_becomes_the_story_body() {
+        let payload = r#"{
+            "hits": [
+                {"objectID": "1", "title": "Ask HN", "story_text": "<p>body", "points": 5},
+                {"objectID": "2", "title": "A link", "url": "https://example.com"},
+                {"objectID": "3", "title": "Blank body", "story_text": "  "}
+            ]
+        }"#;
+        let response: AlgoliaResponse = serde_json::from_str(payload).expect("decode algolia");
+
+        let stories: Vec<Story> = response
+            .hits
+            .into_iter()
+            .map(|hit| hit.into_story().expect("map hit").expect("hit has a title"))
+            .collect();
+
+        assert_eq!(stories[0].text.as_deref(), Some("<p>body"));
+        assert_eq!(stories[1].text, None);
+        assert_eq!(stories[2].text, None);
     }
 }

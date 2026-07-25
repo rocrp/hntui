@@ -10,4 +10,16 @@ model = "gemini/gemini-flash-lite-latest"
 # base_url = ""
 
 max_comments = 200
-system_prompt = "Summarize this Hacker News discussion concisely. Highlight key arguments, disagreements, and consensus points."
+
+# Feed the linked article (or an Ask HN body) to the model alongside the
+# discussion. Requires localwebrs; when the fetch fails the summary still runs
+# on comments alone and says so.
+include_article = true
+max_article_chars = 20000
+
+system_prompt = "Summarize this Hacker News discussion concisely. Highlight key arguments, disagreements, and consensus points. When article content is provided, ground the summary in it: say what the article claims before what commenters make of it."
+
+[article]
+# localwebrs executable used by `v` and by include_article.
+# Install: cargo install --git https://github.com/rocrp/localwebrs
+# bin = "localwebrs"

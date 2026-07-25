@@ -5,6 +5,16 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+/// Which overlay sits in front of the view when help is opened. Drives which
+/// help section is highlighted as active.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum HelpFocus {
+    #[default]
+    View,
+    Summary,
+    Article,
+}
+
 #[derive(Default)]
 pub struct HelpOverlay {
     visible: bool,
@@ -25,13 +35,13 @@ impl HelpOverlay {
         self.visible
     }
 
-    pub fn set_frame(&mut self, area: Rect, active: View, summary_active: bool) {
-        let Some(popup) = popup_rect(area, active, summary_active) else {
+    pub fn set_frame(&mut self, area: Rect, active: View, focus: HelpFocus) {
+        let Some(popup) = popup_rect(area, active, focus) else {
             self.scroll.set_extents(0, 0);
             return;
         };
         let inner = Block::default().borders(Borders::ALL).inner(popup);
-        let wrapped_line_count = content_paragraph(active, summary_active).line_count(inner.width);
+        let wrapped_line_count = content_paragraph(active, focus).line_count(inner.width);
         self.scroll
             .set_extents(wrapped_line_count, usize::from(inner.height));
     }
@@ -77,14 +87,15 @@ fn kv(keys: &str, desc: &str) -> Line<'static> {
     ])
 }
 
-fn content_lines(active: View, summary_active: bool) -> Vec<Line<'static>> {
+fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(Span::styled("Shortcuts", theme::HEADER)),
         Line::from(Span::styled("Press ? or Esc to close.", theme::HINT)),
         Line::raw(""),
     ];
 
-    let stories_active = active == View::Stories;
+    let in_view = focus == HelpFocus::View;
+    let stories_active = in_view && active == View::Stories;
     lines.push(section_title("Stories", stories_active));
     lines.push(kv("j/k, ↓/↑", "move"));
     lines.push(kv("gg, G", "top / bottom"));
@@ -92,6 +103,8 @@ fn content_lines(active: View, summary_active: bool) -> Vec<Line<'static>> {
     lines.push(kv("Enter / Space / l / →", "open comments"));
     lines.push(kv("o", "open source link (browser)"));
     lines.push(kv("O", "open comments page (browser)"));
+    lines.push(kv("s", "summarize (AI)"));
+    lines.push(kv("v", "view article"));
     lines.push(kv("/", "search stories"));
     lines.push(kv("f", "switch feed"));
     lines.push(kv("F", "filter by title"));
@@ -100,7 +113,7 @@ fn content_lines(active: View, summary_active: bool) -> Vec<Line<'static>> {
     lines.push(kv("q / Esc", "quit"));
     lines.push(Line::raw(""));
 
-    let comments_active = active == View::Comments;
+    let comments_active = in_view && active == View::Comments;
     lines.push(section_title("Comments", comments_active));
     lines.push(kv("j/k, ↓/↑", "move"));
     lines.push(kv("gg, G", "top / bottom"));
@@ -112,27 +125,37 @@ fn content_lines(active: View, summary_active: bool) -> Vec<Line<'static>> {
     lines.push(kv("o", "open comments page (browser)"));
     lines.push(kv("O", "open source link (browser)"));
     lines.push(kv("s", "summarize (AI)"));
+    lines.push(kv("v", "view article"));
     lines.push(kv("r", "refresh"));
     lines.push(kv(",", "settings"));
     lines.push(kv("q / Esc", "back"));
     lines.push(Line::raw(""));
 
-    lines.push(section_title("Summary", summary_active));
+    lines.push(section_title("Summary", focus == HelpFocus::Summary));
     lines.push(kv("gg, G", "top / bottom"));
+    lines.push(Line::raw(""));
+
+    lines.push(section_title("Article", focus == HelpFocus::Article));
+    lines.push(kv("j/k, ↓/↑", "scroll"));
+    lines.push(kv("gg, G", "top / bottom"));
+    lines.push(kv("Ctrl+d / Ctrl+u", "page down / up"));
+    lines.push(kv("c", "copy article to clipboard"));
+    lines.push(kv("o", "open the original (browser)"));
+    lines.push(kv("q / Esc", "close (cancels a running fetch)"));
     lines
 }
 
-fn content_paragraph(active: View, summary_active: bool) -> Paragraph<'static> {
-    Paragraph::new(Text::from(content_lines(active, summary_active))).wrap(Wrap { trim: true })
+fn content_paragraph(active: View, focus: HelpFocus) -> Paragraph<'static> {
+    Paragraph::new(Text::from(content_lines(active, focus))).wrap(Wrap { trim: true })
 }
 
-pub(crate) fn popup_rect(area: Rect, active: View, summary_active: bool) -> Option<Rect> {
+pub(crate) fn popup_rect(area: Rect, active: View, focus: HelpFocus) -> Option<Rect> {
     if area.width < 3 || area.height < 3 {
         return None;
     }
     let desired_width = area.width.min(76);
     let inner_width = desired_width.saturating_sub(2);
-    let wrapped_height = content_paragraph(active, summary_active).line_count(inner_width);
+    let wrapped_height = content_paragraph(active, focus).line_count(inner_width);
     let desired_height = wrapped_height
         .saturating_add(2)
         .min(usize::from(area.height))
@@ -143,8 +166,8 @@ pub(crate) fn popup_rect(area: Rect, active: View, summary_active: bool) -> Opti
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let summary_active = app.summary_overlay.is_visible();
-    let Some(popup) = popup_rect(area, app.view, summary_active) else {
+    let focus = app.help_focus();
+    let Some(popup) = popup_rect(area, app.view, focus) else {
         return;
     };
 
@@ -153,7 +176,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled("?", theme::HEADER));
-    let paragraph = content_paragraph(active, summary_active)
+    let paragraph = content_paragraph(active, focus)
         .scroll((app.help_overlay.render_scroll_offset(), 0))
         .block(block)
         .style(theme::POPUP);
@@ -168,7 +191,7 @@ mod tests {
     #[test]
     fn scrolling_stops_when_the_last_help_line_reaches_the_viewport_bottom() {
         let mut overlay = HelpOverlay::default();
-        overlay.set_frame(Rect::new(0, 0, 80, 10), View::Stories, false);
+        overlay.set_frame(Rect::new(0, 0, 80, 10), View::Stories, HelpFocus::View);
 
         overlay.scroll_down(usize::MAX);
         let bottom = overlay.scroll_offset();
@@ -181,7 +204,7 @@ mod tests {
     #[test]
     fn help_that_fits_in_a_tall_terminal_does_not_scroll() {
         let mut overlay = HelpOverlay::default();
-        overlay.set_frame(Rect::new(0, 0, 80, 100), View::Stories, false);
+        overlay.set_frame(Rect::new(0, 0, 80, 100), View::Stories, HelpFocus::View);
 
         overlay.scroll_down(usize::MAX);
 
@@ -190,8 +213,8 @@ mod tests {
 
     #[test]
     fn narrow_terminal_sizes_the_popup_for_wrapped_help_lines() {
-        let wide = popup_rect(Rect::new(0, 0, 80, 100), View::Stories, false).unwrap();
-        let narrow = popup_rect(Rect::new(0, 0, 30, 100), View::Stories, false).unwrap();
+        let wide = popup_rect(Rect::new(0, 0, 80, 100), View::Stories, HelpFocus::View).unwrap();
+        let narrow = popup_rect(Rect::new(0, 0, 30, 100), View::Stories, HelpFocus::View).unwrap();
 
         assert!(
             narrow.height > wide.height,
@@ -201,7 +224,7 @@ mod tests {
 
     #[test]
     fn small_terminal_still_gets_a_scrollable_help_viewport() {
-        let popup = popup_rect(Rect::new(0, 0, 9, 5), View::Stories, false);
+        let popup = popup_rect(Rect::new(0, 0, 9, 5), View::Stories, HelpFocus::View);
 
         assert_eq!(popup, Some(Rect::new(0, 0, 9, 5)));
     }

@@ -1,5 +1,5 @@
 #[derive(Default)]
-pub(super) struct ClampedScroll {
+pub(crate) struct ClampedScroll {
     offset: usize,
     viewport_height: usize,
     content_height: usize,

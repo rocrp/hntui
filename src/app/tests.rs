@@ -8,11 +8,12 @@ use futures::StreamExt;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
 
-fn story(id: u64) -> Story {
+pub(super) fn story(id: u64) -> Story {
     Story {
         id,
         title: format!("story {id}"),
         url: None,
+        text: None,
         score: 10,
         by: "alice".to_string(),
         time: 1,
@@ -21,7 +22,7 @@ fn story(id: u64) -> Story {
     }
 }
 
-fn comment(id: u64) -> CommentNode {
+pub(super) fn comment(id: u64) -> CommentNode {
     CommentNode {
         comment: crate::api::types::Comment {
             id,
@@ -55,6 +56,12 @@ pub(super) fn cli() -> Cli {
     }
 }
 
+/// A fetcher pointed at a binary that does not exist: tests that touch the
+/// Article seam must never spawn a real localwebrs.
+pub(super) fn test_article_fetcher() -> ArticleFetcher {
+    ArticleFetcher::new("hntui-test-no-such-localwebrs".to_string(), None)
+}
+
 pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -74,7 +81,16 @@ fn app_with_scrollable_summary() -> App {
     let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     app.summary_overlay.begin(&story(1), 0);
     app.summary_overlay.handle_event(SummaryEvent::Chunk {
         content: "one\n\ntwo\n\nthree\n\nfour".to_string(),
@@ -92,7 +108,16 @@ async fn refresh_loads_initial_stories_through_the_app_event_seam() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::Refresh);
     let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
@@ -116,7 +141,16 @@ async fn opening_a_story_loads_comments_from_the_in_memory_source() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     app.handle_action(Action::Refresh);
     app.handle_app_event(rx.recv().await.expect("stories event"));
 
@@ -135,13 +169,59 @@ async fn opening_a_story_loads_comments_from_the_in_memory_source() {
 }
 
 #[tokio::test]
+async fn a_self_post_body_delivered_with_the_discussion_reaches_the_story() {
+    let source = Arc::new(
+        InMemorySource::new(vec![story(1)])
+            .with_comments(1, vec![comment(11)])
+            .with_thread_text(1, "<p>the ask hn body"),
+    );
+    let sources = Sources::new(source.clone(), source);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
+    let summarizer = Summarizer::new(None, None, reqwest::Client::new());
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
+    app.handle_action(Action::Refresh);
+    app.handle_app_event(rx.recv().await.expect("stories event"));
+    assert_eq!(app.stories[0].text, None);
+
+    app.handle_action(Action::Enter);
+    app.handle_app_event(rx.recv().await.expect("comments event"));
+
+    assert_eq!(
+        app.current_story
+            .as_ref()
+            .and_then(|story| story.text.as_deref()),
+        Some("<p>the ask hn body")
+    );
+    assert_eq!(app.stories[0].text.as_deref(), Some("<p>the ask hn body"));
+}
+
+#[tokio::test]
 async fn stale_story_result_is_dropped_after_a_refresh() {
     let source = Arc::new(InMemorySource::new(vec![story(1)]));
     let sources = Sources::new(source.clone(), source);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::Refresh);
     let stale = rx.recv().await.expect("stale stories event");
@@ -165,7 +245,16 @@ async fn source_error_is_surfaced_by_the_app() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::Refresh);
     app.handle_app_event(rx.recv().await.expect("error event"));
@@ -181,7 +270,16 @@ async fn search_uses_the_in_memory_search_source_without_pagination_state() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     app.search_query = "rust".to_string();
 
     app.submit_search();
@@ -211,7 +309,16 @@ async fn expanding_a_comment_loads_children_from_the_in_memory_source() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     app.handle_action(Action::Refresh);
     app.handle_app_event(rx.recv().await.expect("stories event"));
     app.handle_action(Action::Enter);
@@ -238,7 +345,16 @@ async fn settings_popup_open_edit_save_flows_only_through_actions() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(path.clone());
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::OpenSettings);
     app.handle_key(key(KeyCode::Enter));
@@ -270,7 +386,16 @@ async fn feed_popup_open_move_select_uses_the_same_action_ladder() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::OpenFeedFilter);
     app.handle_key(key(KeyCode::Down));
@@ -287,7 +412,16 @@ fn mouse_selection_changes_flow_through_indexed_actions() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     app.restore_story_list_state(vec![1, 2], vec![story(1), story(2)], None);
     app.layout_areas.list_area = Rect::new(0, 0, 80, 10);
 
@@ -295,7 +429,11 @@ fn mouse_selection_changes_flow_through_indexed_actions() {
 
     assert_eq!(app.story_list_state.selected(), Some(1));
 
-    app.apply_comments_for_story(story(2), vec![comment(11), comment(12)], true);
+    app.apply_comments_for_story(
+        story(2),
+        StoryThread::from_comments(vec![comment(11), comment(12)]),
+        true,
+    );
     app.comment_layout.relayout(&app.comment_list, 80, 10, '⠋');
     app.handle_mouse(left_click(1, 2));
 
@@ -309,7 +447,16 @@ fn summary_copy_failure_is_surfaced_on_the_app() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
 
     app.handle_action(Action::Summary(SummaryAction::Copy));
 
@@ -353,6 +500,7 @@ async fn refresh_cancels_comment_prefetch_at_the_action_boundary() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
+    let article_fetcher = test_article_fetcher();
     let mut app = App::new(
         cli(),
         Sources::new(story_source, search_source),
@@ -360,6 +508,7 @@ async fn refresh_cancels_comment_prefetch_at_the_action_boundary() {
         None,
         config,
         summarizer,
+        article_fetcher,
     );
     app.restore_story_list_state(vec![item.id], vec![item], None);
     app.last_user_activity = Instant::now() - IDLE_PREFETCH_DELAY;
@@ -375,8 +524,11 @@ async fn refresh_cancels_comment_prefetch_at_the_action_boundary() {
 
     assert!(!app.tasks.is_running(TaskTarget::CommentRoots(1)));
     assert!(!app.comment_loading);
-    assert_eq!(app.pending_summarize_story_id, None);
-    assert!(control.result.send(Ok(vec![comment(11)])).is_err());
+    assert!(app.pending_summary.is_none());
+    assert!(control
+        .result
+        .send(Ok(StoryThread::from_comments(vec![comment(11)])))
+        .is_err());
 
     app.handle_app_event(rx.recv().await.expect("replacement stories event"));
     assert_eq!(app.stories[0].id, 1);
@@ -397,6 +549,7 @@ async fn foreground_navigation_supersedes_same_story_prefetch() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
+    let article_fetcher = test_article_fetcher();
     let mut app = App::new(
         cli(),
         Sources::new(story_source, search_source),
@@ -404,6 +557,7 @@ async fn foreground_navigation_supersedes_same_story_prefetch() {
         None,
         config,
         summarizer,
+        article_fetcher,
     );
     app.restore_story_list_state(vec![item.id], vec![item], None);
     app.last_user_activity = Instant::now() - IDLE_PREFETCH_DELAY;
@@ -420,11 +574,14 @@ async fn foreground_navigation_supersedes_same_story_prefetch() {
         foreground.started.await.expect("foreground load started"),
         1
     );
-    assert!(prefetch.result.send(Ok(vec![comment(10)])).is_err());
+    assert!(prefetch
+        .result
+        .send(Ok(StoryThread::from_comments(vec![comment(10)])))
+        .is_err());
 
     foreground
         .result
-        .send(Ok(vec![comment(11)]))
+        .send(Ok(StoryThread::from_comments(vec![comment(11)])))
         .expect("send foreground comments");
     app.handle_app_event(rx.recv().await.expect("foreground comments event"));
 
@@ -446,7 +603,16 @@ async fn dismissing_summary_cancels_stream_and_rejects_queued_chunks() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let mut app = App::new(cli(), sources, tx, None, config, summarizer);
+    let article_fetcher = test_article_fetcher();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    );
     let item = story(1);
     app.summary_overlay.begin(&item, 1);
 

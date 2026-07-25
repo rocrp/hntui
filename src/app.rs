@@ -1,4 +1,5 @@
-use crate::api::{CommentNode, FeedKind, Sources, Story};
+use crate::api::{CommentNode, FeedKind, Sources, Story, StoryThread};
+use crate::article::{Article, ArticleFetcher};
 use crate::config::Config;
 use crate::input::KeyState;
 use crate::logging;
@@ -13,6 +14,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 mod actions;
+#[cfg(test)]
+mod article_tests;
+mod articles;
 mod comment_tree;
 mod comments;
 mod events;
@@ -31,14 +35,16 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
+use self::articles::ArticleStore;
 use self::prefetch::PrefetchCache;
 pub use self::run::run;
 use self::search::SavedStories;
 pub use self::settings_popup::SettingsPopup;
 use crate::tasks::TaskLifecycle;
 pub(crate) use crate::tasks::{TaskId, TaskTarget};
+use crate::ui::article_overlay::ArticleOverlay;
 use crate::ui::comment_layout::CommentLayout;
-use crate::ui::help::HelpOverlay;
+use crate::ui::help::{HelpFocus, HelpOverlay};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -57,7 +63,7 @@ pub enum AppEvent {
     CommentsLoaded {
         task: TaskId,
         kind: CommentLoadKind,
-        comments: Vec<CommentNode>,
+        thread: StoryThread,
     },
     CommentChildrenLoaded {
         task: TaskId,
@@ -66,6 +72,11 @@ pub enum AppEvent {
     SearchResultsLoaded {
         task: TaskId,
         stories: Vec<Story>,
+    },
+    ArticleLoaded {
+        task: TaskId,
+        story_id: u64,
+        article: Article,
     },
     Summary {
         task: TaskId,
@@ -96,6 +107,26 @@ pub enum CommentLoadKind {
     Prefetch,
 }
 
+/// A summarize waiting on its inputs. The two legs settle independently — the
+/// article fetch and the comment load run in parallel — and the LLM call goes
+/// out once neither is outstanding.
+#[derive(Debug)]
+pub(crate) struct PendingSummary {
+    story_id: u64,
+    comments_ready: bool,
+    article: ArticleLeg,
+}
+
+#[derive(Debug)]
+pub(crate) enum ArticleLeg {
+    Pending,
+    /// Settled. `None` means there was nothing to include — the toggle is off,
+    /// or the story has no link and no body. Not a failure.
+    Ready(Option<String>),
+    /// Settled badly: summarize anyway, but say so.
+    Failed(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct FeedFilterPopup {
     pub feed_cursor: usize,
@@ -111,6 +142,7 @@ const IDLE_PREFETCH_DELAY: Duration = Duration::from_millis(500);
 const MAX_COMMENT_PREFETCH_IN_FLIGHT: usize = 3;
 const PREFETCH_CACHE_CAP: usize = 20;
 const PREFETCH_LOOKAHEAD: usize = 5;
+const ARTICLE_CACHE_CAP: usize = 20;
 
 pub struct App {
     pub view: View,
@@ -139,8 +171,11 @@ pub struct App {
 
     pub has_more_stories: bool,
     prefetched_comments_cache: PrefetchCache,
+    article_fetcher: ArticleFetcher,
+    articles: ArticleStore,
     summarizer: Summarizer,
     pub summary_overlay: SummaryOverlay,
+    pub article_overlay: ArticleOverlay,
 
     pub current_feed: FeedKind,
     pub feed_filter_popup: Option<FeedFilterPopup>,
@@ -154,7 +189,7 @@ pub struct App {
     pub search_query: String,
     pub search_active: bool,
     saved_stories: Option<SavedStories>,
-    pending_summarize_story_id: Option<u64>,
+    pending_summary: Option<PendingSummary>,
 
     input: KeyState,
     should_quit: bool,
@@ -174,6 +209,7 @@ impl App {
         state_store: Option<StateStore>,
         config: Config,
         summarizer: Summarizer,
+        article_fetcher: ArticleFetcher,
     ) -> Self {
         let mut story_list_state = ListState::default();
         story_list_state.select(Some(0));
@@ -212,8 +248,11 @@ impl App {
 
             has_more_stories: true,
             prefetched_comments_cache: PrefetchCache::new(PREFETCH_CACHE_CAP),
+            article_fetcher,
+            articles: ArticleStore::new(ARTICLE_CACHE_CAP),
             summarizer,
             summary_overlay: SummaryOverlay::default(),
+            article_overlay: ArticleOverlay::default(),
             current_feed: FeedKind::default(),
             feed_filter_popup: None,
             settings_popup: None,
@@ -226,7 +265,7 @@ impl App {
             search_query: String::new(),
             search_active: false,
             saved_stories: None,
-            pending_summarize_story_id: None,
+            pending_summary: None,
             input: KeyState::default(),
             should_quit: false,
             spinner_idx: 0,
@@ -263,6 +302,7 @@ impl App {
                     target,
                     TaskTarget::CommentRoots(_)
                         | TaskTarget::CommentChildren(_)
+                        | TaskTarget::Article(_)
                         | TaskTarget::Summary
                         | TaskTarget::SettingsSave
                 )
@@ -277,6 +317,18 @@ impl App {
         self.should_quit
     }
 
+    /// Which help section to highlight — the overlay in front of the view, if
+    /// any. Overlays never stack, so at most one of these is visible.
+    pub(crate) fn help_focus(&self) -> HelpFocus {
+        if self.summary_overlay.is_visible() {
+            HelpFocus::Summary
+        } else if self.article_overlay.is_visible() {
+            HelpFocus::Article
+        } else {
+            HelpFocus::View
+        }
+    }
+
     pub fn prepare_frame(&mut self, area: Rect) {
         self.layout_areas.frame_area = area;
 
@@ -284,8 +336,12 @@ impl App {
             self.summary_overlay
                 .set_viewport(viewport.width, viewport.height);
         }
+        if let Some(viewport) = crate::ui::article_overlay::content_area(area) {
+            self.article_overlay
+                .set_viewport(viewport.width, viewport.height);
+        }
         self.help_overlay
-            .set_frame(area, self.view, self.summary_overlay.is_visible());
+            .set_frame(area, self.view, self.help_focus());
 
         match self.view {
             View::Stories => {

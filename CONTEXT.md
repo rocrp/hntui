@@ -21,6 +21,10 @@ _Avoid_: list, tab
 Where the app obtains stories, comments, or search results. Adapters at this seam: the HN client, Algolia search, and an in-memory fixture for tests.
 _Avoid_: client (when meaning the seam), backend (reserved for the HN API flavor)
 
+**StoryThread**:
+What a Source returns for one story's discussion: the root Comments plus the self-post body, when the backend reports one. Exists because hackerweb only reveals the body alongside the comments (`/item/:id`), never in the feed listing.
+_Avoid_: comment roots (that is only half of it), discussion
+
 **Article**:
 The original content a Story points to — the extracted text of the linked page, or the story's own body for a self-post.
 _Avoid_: page, webpage (an Article is extracted text, not the rendered page), original text
@@ -52,7 +56,7 @@ The view that presents the Summarizer's output — scrolling, copying, streaming
 _Avoid_: plugin overlay
 
 **ArticleFetcher**:
-The seam that obtains an Article for a Story. Adapters at this seam: the localwebrs subprocess for linked pages; self-posts resolve locally from the story body.
+The seam that obtains an Article for a Story. Adapters at this seam: the localwebrs subprocess for linked pages; the story's own body for a self-post — read straight off the Story when the backend supplied it, otherwise from the StoryThread the Source returns.
 _Avoid_: visitor, scraper (localwebrs vocabulary; the seam is hntui's)
 
 **ArticleOverlay**:

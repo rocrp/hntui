@@ -1,14 +1,12 @@
 use crate::api::types::Story;
 use crate::summarizer::SummaryEvent;
-use crate::ui::{clamped_scroll::ClampedScroll, markdown, theme};
+use crate::ui::{clamped_scroll::ClampedScroll, markdown, overlay, theme};
 #[cfg(not(target_os = "android"))]
 use anyhow::Context;
 use anyhow::Result;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
-};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Instant;
 
@@ -32,6 +30,10 @@ pub struct SummaryOverlay {
     viewport_width: u16,
     reasoning: String,
     content_started: bool,
+    /// What the summary is blocked on before the LLM call starts.
+    waiting_for: Option<String>,
+    /// Set when the summary went ahead without an Article it should have had.
+    article_notice: Option<String>,
     model_name: String,
     copied_flash: Option<Instant>,
     story_title: String,
@@ -51,6 +53,8 @@ impl SummaryOverlay {
         self.comment_count = comment_count;
         self.reasoning.clear();
         self.content_started = false;
+        self.waiting_for = None;
+        self.article_notice = None;
         self.model_name.clear();
         self.copied_flash = None;
         self.story_title = story.title.clone();
@@ -60,6 +64,29 @@ impl SummaryOverlay {
         self.story_author = story.by.clone();
         self.story_time = story.time;
         self.reflow();
+    }
+
+    /// Comment count is only known once the discussion has loaded, which can
+    /// be after the overlay is already up.
+    pub fn set_comment_count(&mut self, comment_count: usize) {
+        self.comment_count = comment_count;
+    }
+
+    /// Label the wait while the summary's inputs are still being gathered.
+    pub fn set_waiting_for(&mut self, waiting_for: Option<String>) {
+        self.waiting_for = waiting_for;
+        self.reflow();
+    }
+
+    /// Announce that the summary is comments-only because the Article failed.
+    pub fn set_article_notice(&mut self, notice: Option<String>) {
+        self.article_notice = notice;
+        self.reflow();
+    }
+
+    #[cfg(test)]
+    pub fn article_notice(&self) -> Option<&str> {
+        self.article_notice.as_deref()
     }
 
     pub fn handle_event(&mut self, event: SummaryEvent) {
@@ -127,20 +154,14 @@ impl SummaryOverlay {
         self.scroll.page_amount()
     }
 
+    #[cfg(test)]
     pub fn scroll_offset(&self) -> usize {
         self.scroll.offset()
     }
 
+    #[cfg(test)]
     pub fn wrapped_line_count(&self) -> usize {
         self.scroll.content_height()
-    }
-
-    fn max_scroll_offset(&self) -> usize {
-        self.scroll.max_offset()
-    }
-
-    fn content_overflows_viewport(&self) -> bool {
-        self.wrapped_line_count() > self.scroll.viewport_height()
     }
 
     fn pin_reasoning_to_tail(&mut self) {
@@ -173,34 +194,31 @@ impl SummaryOverlay {
     }
 
     fn copy_text(&self) -> String {
-        let hn_link = format!("https://news.ycombinator.com/item?id={}", self.story_id);
         let mut output = String::from("---\n");
-        output.push_str(&format!(
-            "title: \"{}\"\n",
-            self.story_title.replace('"', "\\\"")
-        ));
+        output.push_str(&overlay::front_matter_title(&self.story_title));
         if let Some(url) = &self.story_url {
             output.push_str(&format!("source: {url}\n"));
         }
-        output.push_str(&format!("hn: {hn_link}\n"));
+        output.push_str(&format!("hn: {}\n", overlay::hn_url(self.story_id)));
         output.push_str(&format!("score: {}\n", self.story_score));
         output.push_str(&format!("author: {}\n", self.story_author));
         output.push_str(&format!("comments: {}\n", self.comment_count));
         output.push_str(&format!("model: {}\n", self.model_name));
-        let date = chrono::DateTime::from_timestamp(self.story_time, 0)
-            .map(|date| date.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
-        output.push_str(&format!("date: {date}\n"));
+        output.push_str(&overlay::front_matter_date(self.story_time));
         output.push_str("---\n\n");
         output.push_str(&self.summary);
         output
     }
 
     fn content_lines(&self, spinner: char) -> Vec<Line<'static>> {
-        match self.state {
+        let body = match self.state {
             SummaryState::Loading if self.reasoning.is_empty() => {
+                let label = self
+                    .waiting_for
+                    .as_deref()
+                    .unwrap_or("Waiting for LLM response");
                 vec![Line::from(Span::styled(
-                    format!("Waiting for LLM response {spinner}"),
+                    format!("{label} {spinner}"),
                     theme::HINT,
                 ))]
             }
@@ -218,8 +236,21 @@ impl SummaryOverlay {
                 self.error.as_deref().unwrap_or("Unknown error").to_string(),
                 theme::ERROR,
             ))],
-            SummaryState::Idle => Vec::new(),
-        }
+            SummaryState::Idle => return Vec::new(),
+        };
+
+        let Some(notice) = &self.article_notice else {
+            return body;
+        };
+        let mut lines = vec![
+            Line::from(Span::styled(
+                format!("⚠ article unavailable ({notice}) — comments only"),
+                theme::WARN,
+            )),
+            Line::raw(""),
+        ];
+        lines.extend(body);
+        lines
     }
 
     fn content_paragraph(&self, spinner: char) -> Paragraph<'static> {
@@ -247,7 +278,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     if !overlay.is_visible() {
         return;
     }
-    let Some(areas) = summary_areas(frame.area()) else {
+    let Some(areas) = overlay::areas(frame.area()) else {
         return;
     };
     let model_tag = if overlay.model_name.is_empty() {
@@ -281,23 +312,9 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
             .style(theme::POPUP),
         areas.content,
     );
-    if overlay.content_overflows_viewport() {
-        // ScrollbarState counts reachable positions. `max + 1` keeps its thumb
-        // aligned with the viewport: top at offset 0, bottom at max offset.
-        let mut scrollbar_state =
-            ScrollbarState::new(overlay.max_scroll_offset().saturating_add(1))
-                .position(overlay.scroll_offset())
-                .viewport_content_length(overlay.scroll.viewport_height());
-        frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            areas.scrollbar,
-            &mut scrollbar_state,
-        );
-    }
-    let show_copied = overlay
-        .copied_flash
-        .is_some_and(|timestamp| timestamp.elapsed().as_secs() < 2);
-    let hint = if show_copied {
+    overlay::render_scrollbar(frame, areas.scrollbar, &overlay.scroll);
+
+    let hint = if overlay::copied_recently(overlay.copied_flash) {
         Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else {
         let text = match overlay.state {
@@ -312,44 +329,11 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
 }
 
 pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
-    if area.width < 12 || area.height < 8 {
-        return None;
-    }
-    Some(super::centered(
-        area,
-        (area.width * 4 / 5).max(30),
-        (area.height * 4 / 5).max(10),
-    ))
+    overlay::popup_rect(area)
 }
 
 pub(crate) fn content_area(area: Rect) -> Option<Rect> {
-    Some(summary_areas(area)?.content)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SummaryAreas {
-    popup: Rect,
-    content: Rect,
-    scrollbar: Rect,
-    hint: Rect,
-}
-
-fn summary_areas(area: Rect) -> Option<SummaryAreas> {
-    let popup = popup_rect(area)?;
-    let inner = Block::default().borders(Borders::ALL).inner(popup);
-    let [body, hint] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
-    let [content, _gutter, scrollbar] = Layout::horizontal([
-        Constraint::Min(0),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(body);
-    Some(SummaryAreas {
-        popup,
-        content,
-        scrollbar,
-        hint,
-    })
+    Some(overlay::areas(area)?.content)
 }
 
 fn reasoning_lines(buffer: &str, spinner: char) -> Vec<Line<'static>> {

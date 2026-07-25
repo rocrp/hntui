@@ -1,4 +1,4 @@
-use super::tests::{cli, key, left_click};
+use super::tests::{cli, key, left_click, test_article_fetcher};
 use super::*;
 use crate::api::{InMemorySource, Sources};
 use crate::config::Config;
@@ -14,7 +14,16 @@ fn test_app() -> App {
     let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(std::env::temp_dir().join("hntui-test-config.toml"));
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    App::new(cli(), sources, tx, None, config, summarizer)
+    let article_fetcher = test_article_fetcher();
+    App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        article_fetcher,
+    )
 }
 
 #[test]

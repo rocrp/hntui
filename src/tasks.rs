@@ -13,6 +13,7 @@ pub(crate) enum TaskTarget {
     Search,
     CommentRoots(u64),
     CommentChildren(u64),
+    Article(u64),
     Summary,
     SettingsSave,
     StoryStateSave,

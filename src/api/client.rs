@@ -1,6 +1,6 @@
 use crate::api::file_cache::{CacheHit, FileCache};
 use crate::api::types::{
-    ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, WebItem, WebStory,
+    ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, StoryThread, WebItem, WebStory,
 };
 use crate::logging;
 use anyhow::{anyhow, Context, Result};
@@ -161,13 +161,15 @@ impl HnClient {
         }
     }
 
-    /// Fetch root-level comments for a story.
+    /// Fetch a story's discussion — the self-post body when the backend
+    /// reports one, plus the root comments.
     ///
-    /// - **HackerWeb**: single request to `/item/:id`, returns full nested tree.
-    /// - **Firebase**: recursive item fetches with prefetch depth.
-    pub async fn fetch_comment_roots(&self, story: &Story) -> Result<Vec<CommentNode>> {
+    /// - **HackerWeb**: single request to `/item/:id`, returns body + nested tree.
+    /// - **Firebase**: recursive item fetches with prefetch depth. The body
+    ///   already rode along with the Story, so the thread carries no text.
+    pub async fn fetch_comment_roots(&self, story: &Story) -> Result<StoryThread> {
         match self.backend {
-            ApiBackend::HackerWeb => self.fetch_hackerweb_comments(story.id).await,
+            ApiBackend::HackerWeb => self.fetch_hackerweb_thread(story.id).await,
             ApiBackend::Firebase => {
                 let kids = if story.kids.is_empty() && story.comment_count > 0 {
                     // Search results don't include kids — fetch the item to get them.
@@ -177,10 +179,12 @@ impl HnClient {
                     story.kids.clone()
                 };
                 if kids.is_empty() {
-                    return Ok(vec![]);
+                    return Ok(StoryThread::default());
                 }
-                self.fetch_comment_nodes_prefetch(&kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
-                    .await
+                let comments = self
+                    .fetch_comment_nodes_prefetch(&kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
+                    .await?;
+                Ok(StoryThread::from_comments(comments))
             }
         }
     }
@@ -227,7 +231,7 @@ impl HnClient {
         Ok(web_stories.into_iter().map(Story::from).collect())
     }
 
-    async fn fetch_hackerweb_comments(&self, story_id: u64) -> Result<Vec<CommentNode>> {
+    async fn fetch_hackerweb_thread(&self, story_id: u64) -> Result<StoryThread> {
         let url = format!("{}/item/{story_id}", self.base_url);
         logging::log_info(format!("hackerweb: fetching {url}"));
         let web_item: WebItem = self
@@ -241,11 +245,14 @@ impl HnClient {
             .json()
             .await
             .with_context(|| format!("decode hackerweb item id={story_id}"))?;
-        Ok(web_item
-            .comments
-            .into_iter()
-            .filter_map(|c| c.into_comment_node(0))
-            .collect())
+        Ok(StoryThread {
+            text: web_item.content.filter(|text| !text.trim().is_empty()),
+            comments: web_item
+                .comments
+                .into_iter()
+                .filter_map(|c| c.into_comment_node(0))
+                .collect(),
+        })
     }
 
     // ── Firebase-only methods (kept for Firebase backend) ──

@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum InputLayer {
     Help,
     Summary,
+    Article,
     SettingsEditor,
     Settings,
     FeedFilter,
@@ -31,6 +32,20 @@ pub enum SummaryAction {
     GoTop,
     GoBottom,
     Copy,
+    OpenHelp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArticleAction {
+    Dismiss,
+    ScrollDown(usize),
+    ScrollUp(usize),
+    PageDown,
+    PageUp,
+    GoTop,
+    GoBottom,
+    Copy,
+    OpenBrowser,
     OpenHelp,
 }
 
@@ -105,6 +120,11 @@ mod routing_tests {
                 InputLayer::Summary,
                 key(KeyCode::Esc),
                 Action::Summary(SummaryAction::Dismiss),
+            ),
+            (
+                InputLayer::Article,
+                key(KeyCode::Esc),
+                Action::Article(ArticleAction::Dismiss),
             ),
             (
                 InputLayer::FeedFilter,
@@ -218,6 +238,106 @@ mod routing_tests {
     }
 
     #[test]
+    fn v_opens_the_article_from_a_view_but_is_inert_inside_the_overlay() {
+        let v = key(KeyCode::Char('v'));
+
+        assert_eq!(
+            KeyState::default().on_key(InputLayer::View, v),
+            Action::ViewArticle
+        );
+        // Overlays never stack: `v` does nothing from inside one.
+        assert_eq!(
+            KeyState::default().on_key(InputLayer::Article, v),
+            Action::Noop
+        );
+        assert_eq!(
+            KeyState::default().on_key(InputLayer::Summary, v),
+            Action::Noop
+        );
+    }
+
+    #[test]
+    fn article_keys_route_to_article_actions() {
+        let cases = [
+            (
+                key(KeyCode::Char('j')),
+                Action::Article(ArticleAction::ScrollDown(1)),
+            ),
+            (
+                key(KeyCode::Char('k')),
+                Action::Article(ArticleAction::ScrollUp(1)),
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+                Action::Article(ArticleAction::PageDown),
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                Action::Article(ArticleAction::PageUp),
+            ),
+            (
+                key(KeyCode::PageDown),
+                Action::Article(ArticleAction::PageDown),
+            ),
+            (key(KeyCode::PageUp), Action::Article(ArticleAction::PageUp)),
+            (
+                key(KeyCode::Char('G')),
+                Action::Article(ArticleAction::GoBottom),
+            ),
+            (
+                key(KeyCode::Char('c')),
+                Action::Article(ArticleAction::Copy),
+            ),
+            (
+                key(KeyCode::Char('o')),
+                Action::Article(ArticleAction::OpenBrowser),
+            ),
+            (
+                key(KeyCode::Char('q')),
+                Action::Article(ArticleAction::Dismiss),
+            ),
+            (
+                key(KeyCode::Char('?')),
+                Action::Article(ArticleAction::OpenHelp),
+            ),
+        ];
+
+        for (key, expected) in cases {
+            assert_eq!(
+                KeyState::default().on_key(InputLayer::Article, key),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn double_g_routes_to_article_top_without_leaking_across_layers() {
+        let mut keys = KeyState::default();
+
+        assert_eq!(
+            keys.on_key(InputLayer::Article, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Article, key(KeyCode::Char('g'))),
+            Action::Article(ArticleAction::GoTop)
+        );
+
+        assert_eq!(
+            keys.on_key(InputLayer::Article, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Noop
+        );
+        assert_eq!(
+            keys.on_key(InputLayer::Summary, key(KeyCode::Char('g'))),
+            Action::Summary(SummaryAction::GoTop)
+        );
+    }
+
+    #[test]
     fn help_scroll_keys_route_to_help_actions() {
         let cases = [
             (
@@ -251,6 +371,7 @@ pub enum Action {
     Noop,
     Help(HelpAction),
     Summary(SummaryAction),
+    Article(ArticleAction),
     FeedFilter(FeedFilterAction),
     Settings(SettingsAction),
     FilterInput(TextAction),
@@ -272,6 +393,7 @@ pub enum Action {
     ToggleCollapse,
     Refresh,
     Summarize,
+    ViewArticle,
     StartSearch,
     OpenFeedFilter,
     OpenFilter,
@@ -288,7 +410,10 @@ pub struct KeyState {
 
 impl KeyState {
     pub fn on_key(&mut self, layer: InputLayer, key: KeyEvent) -> Action {
-        if !matches!(layer, InputLayer::Summary | InputLayer::View) {
+        if !matches!(
+            layer,
+            InputLayer::Summary | InputLayer::Article | InputLayer::View
+        ) {
             self.pending_g_layer = None;
         }
         match layer {
@@ -308,6 +433,7 @@ impl KeyState {
                 _ => Action::Noop,
             },
             InputLayer::Summary => self.summary_action(key),
+            InputLayer::Article => self.article_action(key),
             InputLayer::FeedFilter => match (key.code, key.modifiers) {
                 (KeyCode::Esc, _) => Action::FeedFilter(FeedFilterAction::Dismiss),
                 (KeyCode::Enter, _) => Action::FeedFilter(FeedFilterAction::Select),
@@ -376,6 +502,40 @@ impl KeyState {
         }
     }
 
+    fn article_action(&mut self, key: KeyEvent) -> Action {
+        if let Some(action) = self.g_sequence_action(
+            InputLayer::Article,
+            key,
+            Action::Article(ArticleAction::GoTop),
+        ) {
+            return action;
+        }
+
+        match (key.code, key.modifiers) {
+            (KeyCode::Esc, _)
+            | (KeyCode::Char('q'), KeyModifiers::NONE)
+            | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                Action::Article(ArticleAction::Dismiss)
+            }
+            (KeyCode::Char('?'), _) => Action::Article(ArticleAction::OpenHelp),
+            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
+                Action::Article(ArticleAction::ScrollDown(1))
+            }
+            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
+                Action::Article(ArticleAction::ScrollUp(1))
+            }
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Article(ArticleAction::PageDown),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => Action::Article(ArticleAction::PageUp),
+            (KeyCode::PageDown, _) => Action::Article(ArticleAction::PageDown),
+            (KeyCode::PageUp, _) => Action::Article(ArticleAction::PageUp),
+            (KeyCode::Char('G'), KeyModifiers::SHIFT)
+            | (KeyCode::Char('G'), KeyModifiers::NONE) => Action::Article(ArticleAction::GoBottom),
+            (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Article(ArticleAction::Copy),
+            (KeyCode::Char('o'), KeyModifiers::NONE) => Action::Article(ArticleAction::OpenBrowser),
+            _ => Action::Noop,
+        }
+    }
+
     fn view_action(&mut self, key: KeyEvent) -> Action {
         if let Some(action) = self.g_sequence_action(InputLayer::View, key, Action::GoTop) {
             return action;
@@ -403,6 +563,7 @@ impl KeyState {
             (KeyCode::Char('c'), KeyModifiers::NONE) => Action::ToggleCollapse,
             (KeyCode::Char('r'), KeyModifiers::NONE) => Action::Refresh,
             (KeyCode::Char('s'), KeyModifiers::NONE) => Action::Summarize,
+            (KeyCode::Char('v'), KeyModifiers::NONE) => Action::ViewArticle,
             (KeyCode::Char('/'), _) => Action::StartSearch,
             (KeyCode::Char('f'), KeyModifiers::NONE) => Action::OpenFeedFilter,
             (KeyCode::Char('F'), KeyModifiers::SHIFT)

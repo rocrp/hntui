@@ -14,11 +14,9 @@ impl App {
                 story_ids,
                 stories,
             } => self.handle_stories_loaded(task, mode, story_ids, stories),
-            AppEvent::CommentsLoaded {
-                task,
-                kind,
-                comments,
-            } => self.handle_comments_loaded(task, kind, comments),
+            AppEvent::CommentsLoaded { task, kind, thread } => {
+                self.handle_comments_loaded(task, kind, thread)
+            }
             AppEvent::CommentChildrenLoaded { task, children } => {
                 if !self.tasks.finish(task) {
                     return;
@@ -45,6 +43,18 @@ impl App {
                 self.story_list_state.select(Some(0));
                 *self.story_list_state.offset_mut() = 0;
                 self.recompute_visible_stories();
+            }
+            AppEvent::ArticleLoaded {
+                task,
+                story_id,
+                article,
+            } => {
+                if !self.tasks.finish(task) {
+                    return;
+                }
+                assert_eq!(task.target(), TaskTarget::Article(story_id));
+                self.articles.insert(story_id, article.clone());
+                self.deliver_article(story_id, Ok(article));
             }
             AppEvent::Summary { task, event } => {
                 if !self.tasks.is_current(task) {
@@ -130,7 +140,7 @@ impl App {
         &mut self,
         task: TaskId,
         kind: CommentLoadKind,
-        comments: Vec<crate::api::CommentNode>,
+        thread: crate::api::StoryThread,
     ) {
         if !self.tasks.finish(task) {
             return;
@@ -151,13 +161,13 @@ impl App {
                     .current_story
                     .clone()
                     .expect("current story present for foreground comments");
-                self.apply_comments_for_story(story, comments, false);
+                self.apply_comments_for_story(story, thread, false);
                 self.maybe_start_pending_summary(story_id);
             }
             CommentLoadKind::Prefetch => {
                 let selected = self.story_list_state.selected().unwrap_or(0);
                 self.prefetched_comments_cache
-                    .insert(story_id, comments, &self.stories, selected);
+                    .insert(story_id, thread, &self.stories, selected);
                 self.maybe_prefetch_comments();
             }
         }
@@ -181,9 +191,7 @@ impl App {
                 {
                     self.comment_loading = false;
                 }
-                if self.pending_summarize_story_id == Some(story_id) {
-                    self.pending_summarize_story_id = None;
-                }
+                self.fail_pending_summary(story_id, &message);
                 self.last_error = Some(message);
                 self.maybe_prefetch_comments();
             }
@@ -197,6 +205,7 @@ impl App {
                 self.last_error = Some(message);
                 self.rebuild_comment_list(Some(parent_id));
             }
+            TaskTarget::Article(story_id) => self.deliver_article(story_id, Err(message)),
             TaskTarget::Summary => self.summary_overlay.fail(message),
             TaskTarget::SettingsSave => {
                 self.last_error = Some(format!("settings: {message}"));

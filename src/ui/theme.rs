@@ -20,6 +20,7 @@ pub(crate) const BLUE: Color = hex(0x8CAAEE);
 pub(crate) const TEAL: Color = hex(0x81C8BE);
 pub(crate) const GREEN: Color = hex(0xA6D189);
 pub(crate) const RED: Color = hex(0xE78284);
+pub(crate) const PEACH: Color = hex(0xEF9F76);
 pub(crate) const MAUVE: Color = hex(0xCA9EE6);
 
 const RAINBOW: [Color; 10] = [
@@ -113,6 +114,8 @@ pub(crate) const ACCENT: Style = Style::new().fg(MAUVE).add_modifier(Modifier::B
 pub(crate) const SUCCESS: Style = Style::new().fg(GREEN).add_modifier(Modifier::BOLD);
 /// Error text
 pub(crate) const ERROR: Style = Style::new().fg(RED);
+/// Degraded-but-usable notice (e.g. a summary without its article)
+pub(crate) const WARN: Style = Style::new().fg(PEACH);
 /// Subtle metadata (overlay0)
 pub(crate) const META: Style = Style::new().fg(OVERLAY0);
 /// Selected-item highlight bg

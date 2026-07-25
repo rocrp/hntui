@@ -1,5 +1,6 @@
 mod api;
 mod app;
+mod article;
 mod browser;
 mod config;
 mod input;

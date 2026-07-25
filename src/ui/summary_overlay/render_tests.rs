@@ -15,9 +15,13 @@ fn streaming_overlay(summary: &str) -> SummaryOverlay {
     overlay
 }
 
-fn render_overlay(overlay: &mut SummaryOverlay, width: u16, height: u16) -> (Buffer, SummaryAreas) {
+fn render_overlay(
+    overlay: &mut SummaryOverlay,
+    width: u16,
+    height: u16,
+) -> (Buffer, overlay::OverlayAreas) {
     let area = Rect::new(0, 0, width, height);
-    let areas = summary_areas(area).expect("test terminal should fit summary popup");
+    let areas = overlay::areas(area).expect("test terminal should fit summary popup");
     overlay.set_viewport(areas.content.width, areas.content.height);
 
     let backend = TestBackend::new(width, height);

@@ -1,4 +1,7 @@
-use crate::config::{Config, SummarizeConfig};
+use crate::config::{
+    default_include_article, default_max_article_chars, default_max_comments, Config,
+    SummarizeConfig,
+};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,15 +10,19 @@ pub(crate) enum SettingsField {
     ApiKey,
     BaseUrl,
     MaxComments,
+    IncludeArticle,
+    MaxArticleChars,
     SystemPrompt,
 }
 
 impl SettingsField {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Model,
         Self::ApiKey,
         Self::BaseUrl,
         Self::MaxComments,
+        Self::IncludeArticle,
+        Self::MaxArticleChars,
         Self::SystemPrompt,
     ];
 
@@ -25,6 +32,8 @@ impl SettingsField {
             Self::ApiKey => "API Key",
             Self::BaseUrl => "Base URL",
             Self::MaxComments => "Max Comments",
+            Self::IncludeArticle => "Include Article",
+            Self::MaxArticleChars => "Max Article Chars",
             Self::SystemPrompt => "System Prompt",
         }
     }
@@ -43,6 +52,8 @@ pub struct SettingsPopup {
     pub api_key: String,
     pub base_url: String,
     pub max_comments: String,
+    pub include_article: String,
+    pub max_article_chars: String,
     pub system_prompt: String,
     pub api_key_status: Option<String>,
     pub dirty: bool,
@@ -67,6 +78,8 @@ impl SettingsPopup {
                 api_key: c.api_key.clone().unwrap_or_default(),
                 base_url: c.base_url.clone().unwrap_or_default(),
                 max_comments: c.max_comments.to_string(),
+                include_article: c.include_article.to_string(),
+                max_article_chars: c.max_article_chars.to_string(),
                 system_prompt: c.system_prompt.clone(),
                 api_key_status,
                 dirty: false,
@@ -80,7 +93,9 @@ impl SettingsPopup {
                 model: String::new(),
                 api_key: String::new(),
                 base_url: String::new(),
-                max_comments: "200".to_string(),
+                max_comments: default_max_comments().to_string(),
+                include_article: default_include_article().to_string(),
+                max_article_chars: default_max_article_chars().to_string(),
                 system_prompt: String::new(),
                 api_key_status,
                 dirty: false,
@@ -103,6 +118,8 @@ impl SettingsPopup {
             SettingsField::ApiKey => &self.api_key,
             SettingsField::BaseUrl => &self.base_url,
             SettingsField::MaxComments => &self.max_comments,
+            SettingsField::IncludeArticle => &self.include_article,
+            SettingsField::MaxArticleChars => &self.max_article_chars,
             SettingsField::SystemPrompt => &self.system_prompt,
         }
     }
@@ -113,6 +130,8 @@ impl SettingsPopup {
             SettingsField::ApiKey => &mut self.api_key,
             SettingsField::BaseUrl => &mut self.base_url,
             SettingsField::MaxComments => &mut self.max_comments,
+            SettingsField::IncludeArticle => &mut self.include_article,
+            SettingsField::MaxArticleChars => &mut self.max_article_chars,
             SettingsField::SystemPrompt => &mut self.system_prompt,
         }
     }

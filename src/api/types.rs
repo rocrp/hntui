@@ -112,6 +112,9 @@ impl From<WebStory> for Story {
             id: ws.id,
             title: ws.title,
             url: ws.url,
+            // The feed listing carries no self-post body; it arrives with the
+            // discussion (`/item/:id`) as a StoryThread.
+            text: None,
             score: ws.points.unwrap_or(0),
             by: ws.user.unwrap_or_default(),
             time: ws.time,
@@ -121,9 +124,11 @@ impl From<WebStory> for Story {
     }
 }
 
-/// A story with nested comments from `/item/:id`.
+/// A story with its body and nested comments from `/item/:id`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebItem {
+    /// Self-post body (HN HTML). Absent for link submissions.
+    pub content: Option<String>,
     #[serde(default)]
     pub comments: Vec<WebComment>,
 }
@@ -217,11 +222,43 @@ pub struct Story {
     pub id: u64,
     pub title: String,
     pub url: Option<String>,
+    /// Self-post body (HN HTML) — the Article for a story with no `url`.
+    /// Optional in persisted state: older `state.json` files predate it.
+    #[serde(default)]
+    pub text: Option<String>,
     pub score: i64,
     pub by: String,
     pub time: i64,
     pub comment_count: i64,
     pub kids: Vec<u64>,
+}
+
+impl Story {
+    /// Adopt a body discovered alongside the discussion, without overwriting
+    /// one the listing already supplied.
+    pub fn absorb_text(&mut self, text: Option<String>) {
+        if self.text.is_some() {
+            return;
+        }
+        self.text = text.filter(|text| !text.trim().is_empty());
+    }
+}
+
+/// A story's discussion as one backend response: the self-post body (when the
+/// backend reports one) plus the root comments.
+#[derive(Debug, Clone, Default)]
+pub struct StoryThread {
+    pub text: Option<String>,
+    pub comments: Vec<CommentNode>,
+}
+
+impl StoryThread {
+    pub fn from_comments(comments: Vec<CommentNode>) -> Self {
+        Self {
+            text: None,
+            comments,
+        }
+    }
 }
 
 impl TryFrom<HnItem> for Story {
@@ -242,6 +279,7 @@ impl TryFrom<HnItem> for Story {
                 .title
                 .ok_or_else(|| anyhow!("item missing title id={}", item.id))?,
             url: item.url,
+            text: item.text,
             score: item
                 .score
                 .ok_or_else(|| anyhow!("item missing score id={}", item.id))?,
@@ -296,4 +334,77 @@ impl Comment {
 pub struct CommentNode {
     pub comment: Comment,
     pub children: Vec<CommentNode>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ask_hn_item() -> HnItem {
+        HnItem {
+            id: 7,
+            kind: Some(HnItemKind::Story),
+            by: Some("alice".to_string()),
+            time: Some(1),
+            title: Some("Ask HN: anything?".to_string()),
+            url: None,
+            text: Some("<p>the body".to_string()),
+            score: Some(1),
+            descendants: Some(0),
+            kids: None,
+            dead: None,
+            deleted: None,
+        }
+    }
+
+    #[test]
+    fn self_post_body_survives_the_item_to_story_conversion() {
+        let story = Story::try_from(ask_hn_item()).expect("ask hn item is a story");
+
+        assert_eq!(story.text.as_deref(), Some("<p>the body"));
+        assert_eq!(story.url, None);
+    }
+
+    #[test]
+    fn hackerweb_item_carries_the_self_post_body_with_the_discussion() {
+        let payload = r#"{"content":"<p>the body","comments":[]}"#;
+        let item: WebItem = serde_json::from_str(payload).expect("decode hackerweb item");
+
+        let thread = StoryThread {
+            text: item.content.filter(|text| !text.trim().is_empty()),
+            comments: Vec::new(),
+        };
+
+        assert_eq!(thread.text.as_deref(), Some("<p>the body"));
+    }
+
+    #[test]
+    fn a_link_submission_has_no_body_in_either_shape() {
+        let mut item = ask_hn_item();
+        item.text = None;
+        item.url = Some("https://example.com".to_string());
+        let story = Story::try_from(item).expect("link item is a story");
+
+        let payload = r#"{"comments":[]}"#;
+        let web_item: WebItem = serde_json::from_str(payload).expect("decode hackerweb item");
+
+        assert_eq!(story.text, None);
+        assert_eq!(web_item.content, None);
+    }
+
+    #[test]
+    fn absorb_text_fills_a_missing_body_but_never_overwrites_one() {
+        let mut listed = Story::try_from(ask_hn_item()).expect("story");
+        listed.text = None;
+        listed.absorb_text(Some("<p>from the thread".to_string()));
+        assert_eq!(listed.text.as_deref(), Some("<p>from the thread"));
+
+        listed.absorb_text(Some("<p>later, ignored".to_string()));
+        assert_eq!(listed.text.as_deref(), Some("<p>from the thread"));
+
+        let mut blank = Story::try_from(ask_hn_item()).expect("story");
+        blank.text = None;
+        blank.absorb_text(Some("   ".to_string()));
+        assert_eq!(blank.text, None);
+    }
 }

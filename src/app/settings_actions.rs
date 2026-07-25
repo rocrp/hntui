@@ -232,16 +232,23 @@ impl App {
             self.last_error = Some("settings: model must be non-empty".to_string());
             return;
         }
-        let max_comments = match popup.max_comments.trim().parse::<usize>() {
-            Ok(number) if number > 0 => number,
-            Ok(_) => {
-                self.last_error = Some("settings: max comments must be > 0".to_string());
+        let max_comments = match parse_positive(&popup.max_comments) {
+            Ok(number) => number,
+            Err(reason) => {
+                self.last_error = Some(format!("settings: max comments {reason}"));
                 return;
             }
-            Err(error) => {
-                self.last_error = Some(format!("settings: invalid max comments: {error}"));
+        };
+        let max_article_chars = match parse_positive(&popup.max_article_chars) {
+            Ok(number) => number,
+            Err(reason) => {
+                self.last_error = Some(format!("settings: max article chars {reason}"));
                 return;
             }
+        };
+        let Some(include_article) = parse_bool(&popup.include_article) else {
+            self.last_error = Some("settings: include article must be true or false".to_string());
+            return;
         };
         let system_prompt = if popup.system_prompt.trim().is_empty() {
             default_system_prompt()
@@ -255,6 +262,8 @@ impl App {
             api_key,
             base_url,
             max_comments,
+            include_article,
+            max_article_chars,
             system_prompt,
         };
 
@@ -270,4 +279,47 @@ impl App {
 fn nonempty_owned(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_string())
+}
+
+fn parse_positive(value: &str) -> Result<usize, String> {
+    match value.trim().parse::<usize>() {
+        Ok(number) if number > 0 => Ok(number),
+        Ok(_) => Err("must be > 0".to_string()),
+        Err(error) => Err(format!("is invalid: {error}")),
+    }
+}
+
+/// The settings popup is a text editor, so the boolean row accepts the words
+/// people actually type for it.
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Some(true),
+        "false" | "no" | "off" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_boolean_row_accepts_the_usual_spellings() {
+        for yes in ["true", "TRUE", " yes ", "on", "1"] {
+            assert_eq!(parse_bool(yes), Some(true), "for {yes:?}");
+        }
+        for no in ["false", "No", "off", "0"] {
+            assert_eq!(parse_bool(no), Some(false), "for {no:?}");
+        }
+        for junk in ["", "maybe", "2"] {
+            assert_eq!(parse_bool(junk), None, "for {junk:?}");
+        }
+    }
+
+    #[test]
+    fn positive_numbers_reject_zero_and_junk() {
+        assert_eq!(parse_positive(" 20000 "), Ok(20_000));
+        assert!(parse_positive("0").is_err());
+        assert!(parse_positive("many").is_err());
+    }
 }

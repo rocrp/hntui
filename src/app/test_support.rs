@@ -1,4 +1,4 @@
-use crate::api::{CommentNode, FeedKind, Story, StorySource};
+use crate::api::{CommentNode, FeedKind, Story, StorySource, StoryThread};
 use futures::future::BoxFuture;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -15,13 +15,13 @@ impl Drop for DropSignal {
 
 pub(super) struct RootRequest {
     started: tokio::sync::oneshot::Sender<u64>,
-    result: tokio::sync::oneshot::Receiver<anyhow::Result<Vec<CommentNode>>>,
+    result: tokio::sync::oneshot::Receiver<anyhow::Result<StoryThread>>,
     dropped: tokio::sync::oneshot::Sender<()>,
 }
 
 pub(super) struct RootControl {
     pub(super) started: tokio::sync::oneshot::Receiver<u64>,
-    pub(super) result: tokio::sync::oneshot::Sender<anyhow::Result<Vec<CommentNode>>>,
+    pub(super) result: tokio::sync::oneshot::Sender<anyhow::Result<StoryThread>>,
     pub(super) dropped: tokio::sync::oneshot::Receiver<()>,
 }
 
@@ -81,7 +81,7 @@ impl StorySource for ControlledStorySource {
         Box::pin(async { Ok(Vec::new()) })
     }
 
-    fn comment_roots(&self, story: Story) -> BoxFuture<'static, anyhow::Result<Vec<CommentNode>>> {
+    fn comment_roots(&self, story: Story) -> BoxFuture<'static, anyhow::Result<StoryThread>> {
         let request = self
             .root_requests
             .lock()
