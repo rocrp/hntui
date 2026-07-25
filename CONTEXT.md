@@ -21,6 +21,10 @@ _Avoid_: list, tab
 Where the app obtains stories, comments, or search results. Adapters at this seam: the HN client, Algolia search, and an in-memory fixture for tests.
 _Avoid_: client (when meaning the seam), backend (reserved for the HN API flavor)
 
+**Article**:
+The original content a Story points to — the extracted text of the linked page, or the story's own body for a self-post.
+_Avoid_: page, webpage (an Article is extracted text, not the rendered page), original text
+
 ### Interaction
 
 **Action**:
@@ -46,3 +50,10 @@ _Avoid_: plugin (there is no plugin system; one adapter does not make a seam)
 **SummaryOverlay**:
 The view that presents the Summarizer's output — scrolling, copying, streaming display.
 _Avoid_: plugin overlay
+
+**ArticleFetcher**:
+The seam that obtains an Article for a Story. Adapters at this seam: the localwebrs subprocess for linked pages; self-posts resolve locally from the story body.
+_Avoid_: visitor, scraper (localwebrs vocabulary; the seam is hntui's)
+
+**ArticleOverlay**:
+The view that presents an Article — scrolling, copying, opening the original in the browser.
