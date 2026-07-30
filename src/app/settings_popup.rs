@@ -4,6 +4,11 @@ use crate::config::{
 };
 use std::time::{Duration, Instant};
 
+pub(super) fn nonempty_owned(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingsField {
     Model,

@@ -35,17 +35,21 @@ fn render_test_popup(popup: &SettingsPopup, width: u16, height: u16) -> (Buffer,
     (terminal.backend().buffer().clone(), popup_area)
 }
 
-fn line_text(buffer: &Buffer, area: Rect, row: u16) -> String {
-    (area.left()..area.right())
-        .map(|column| buffer[(column, row)].symbol())
-        .collect()
-}
-
 fn find_text(buffer: &Buffer, area: Rect, needle: &str, min_row: u16) -> (u16, u16) {
     for row in min_row..area.bottom() {
-        let line = line_text(buffer, area, row);
-        if let Some(column) = line.find(needle) {
-            return (area.x + column as u16, row);
+        let mut line = String::new();
+        let mut cell_starts = Vec::with_capacity(usize::from(area.width));
+        for column in area.left()..area.right() {
+            cell_starts.push((line.len(), column));
+            line.push_str(buffer[(column, row)].symbol());
+        }
+        if let Some(byte_offset) = line.find(needle) {
+            let column = cell_starts
+                .iter()
+                .rev()
+                .find_map(|(start, column)| (*start <= byte_offset).then_some(*column))
+                .expect("matched text has a buffer cell");
+            return (column, row);
         }
     }
     panic!("{needle:?} not rendered in {area:?}");
@@ -177,6 +181,16 @@ fn connection_test_states_use_their_semantic_styles() {
         popup.connection_test = state;
         let (buffer, area) = render_test_popup(&popup, 120, 30);
         let (column, row) = find_text(&buffer, area, &expected, area.top());
+        let first_symbol = expected
+            .chars()
+            .next()
+            .expect("connection-test status text")
+            .to_string();
+        assert_eq!(
+            buffer[(column, row)].symbol(),
+            first_symbol,
+            "coordinate must point at the first matched cell after the Unicode icon"
+        );
         assert_eq!(buffer[(column, row)].fg, color, "for {expected}");
     }
 }

@@ -1,3 +1,4 @@
+use super::settings_popup::nonempty_owned;
 use super::{App, AppEvent, ConnectionTestState, SettingsPopup, TaskId, TaskTarget};
 use crate::config::default_system_prompt;
 use crate::summarizer::{ConnectionDraft, ConnectionTestError, ConnectionTestSuccess};
@@ -67,11 +68,6 @@ fn connection_draft(popup: &SettingsPopup, hntui_key: Option<&str>) -> Connectio
         api_key: resolve_draft_api_key(hntui_key, &popup.api_key),
         base_url: nonempty_owned(&popup.base_url),
     }
-}
-
-fn nonempty_owned(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn resolve_draft_api_key(hntui_key: Option<&str>, draft_key: &str) -> Option<String> {

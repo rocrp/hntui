@@ -1,3 +1,4 @@
+use super::settings_popup::nonempty_owned;
 use super::{App, AppEvent, SettingsPopup, SettingsRow};
 use crate::api::FeedKind;
 use crate::app::TaskTarget;
@@ -288,11 +289,6 @@ impl App {
             |task, config| AppEvent::SettingsSaved { task, config },
         );
     }
-}
-
-fn nonempty_owned(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn parse_positive(value: &str) -> Result<usize, String> {
