@@ -1,5 +1,8 @@
 pub mod client;
+#[cfg(test)]
+mod client_tests;
 mod file_cache;
+mod hackerweb_response;
 pub mod search;
 mod source;
 pub mod types;

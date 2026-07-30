@@ -1,4 +1,5 @@
 use crate::api::file_cache::{CacheHit, FileCache};
+use crate::api::hackerweb_response::decode_json as decode_hackerweb_json;
 use crate::api::types::{
     ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, StoryThread, WebItem, WebStory,
 };
@@ -216,35 +217,36 @@ impl HnClient {
         let path = feed.hackerweb_path();
         let url = format!("{}{}?page={page}", self.base_url, path);
         let label = feed.as_str();
-        logging::log_info(format!("hackerweb: fetching {url}"));
-        let web_stories: Vec<WebStory> = self
+        logging::log_info(format!("hackerweb: fetching {label} page={page}"));
+        let response = self
             .http
             .get(&url)
             .send()
             .await
-            .with_context(|| format!("fetch hackerweb {label} page={page}"))?
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| format!("HackerWeb request failed for {label} page={page}"))?
             .error_for_status()
-            .with_context(|| format!("hackerweb {label} status page={page}"))?
-            .json()
-            .await
-            .with_context(|| format!("decode hackerweb {label} page={page}"))?;
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| format!("HackerWeb returned an error for {label} page={page}"))?;
+        let web_stories: Vec<WebStory> =
+            decode_hackerweb_json(response, format!("{label} page={page}")).await?;
         Ok(web_stories.into_iter().map(Story::from).collect())
     }
 
     async fn fetch_hackerweb_thread(&self, story_id: u64) -> Result<StoryThread> {
         let url = format!("{}/item/{story_id}", self.base_url);
-        logging::log_info(format!("hackerweb: fetching {url}"));
-        let web_item: WebItem = self
+        logging::log_info(format!("hackerweb: fetching item id={story_id}"));
+        let response = self
             .http
             .get(&url)
             .send()
             .await
-            .with_context(|| format!("fetch hackerweb item id={story_id}"))?
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| format!("HackerWeb request failed for item id={story_id}"))?
             .error_for_status()
-            .with_context(|| format!("hackerweb item status id={story_id}"))?
-            .json()
-            .await
-            .with_context(|| format!("decode hackerweb item id={story_id}"))?;
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| format!("HackerWeb returned an error for item id={story_id}"))?;
+        let web_item: WebItem = decode_hackerweb_json(response, format!("item {story_id}")).await?;
         Ok(StoryThread {
             text: web_item.content.filter(|text| !text.trim().is_empty()),
             comments: web_item
