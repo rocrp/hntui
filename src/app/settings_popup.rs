@@ -60,6 +60,24 @@ pub struct SettingsPopup {
     pub saved_at: Option<Instant>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResolvedEndpointPreview {
+    Ready(String),
+    Error(String),
+}
+
+impl ResolvedEndpointPreview {
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Self::Ready(text) | Self::Error(text) => text,
+        }
+    }
+
+    pub(crate) fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_))
+    }
+}
+
 impl SettingsPopup {
     pub const FIELD_COUNT: usize = SettingsField::ALL.len();
 
@@ -121,6 +139,36 @@ impl SettingsPopup {
             SettingsField::IncludeArticle => &self.include_article,
             SettingsField::MaxArticleChars => &self.max_article_chars,
             SettingsField::SystemPrompt => &self.system_prompt,
+        }
+    }
+
+    fn draft_field_value(&self, field: SettingsField) -> &str {
+        if self.editing && self.selected_field() == field {
+            &self.edit_buffer
+        } else {
+            self.field_value(field)
+        }
+    }
+
+    pub(crate) fn resolved_endpoint_preview(&self) -> ResolvedEndpointPreview {
+        let model = self.draft_field_value(SettingsField::Model).trim();
+        let base_url = self.draft_field_value(SettingsField::BaseUrl).trim();
+        let base_url = (!base_url.is_empty()).then_some(base_url);
+
+        match smolllm::resolve_endpoints(model, base_url) {
+            Ok(endpoints) => {
+                let additional = endpoints.len().saturating_sub(1);
+                let first = endpoints
+                    .first()
+                    .expect("valid model list resolved without an endpoint");
+                let suffix = if additional == 0 {
+                    String::new()
+                } else {
+                    format!(" (+{additional} more)")
+                };
+                ResolvedEndpointPreview::Ready(format!("POST {}{suffix}", first.url))
+            }
+            Err(error) => ResolvedEndpointPreview::Error(error.to_string()),
         }
     }
 
@@ -276,5 +324,74 @@ mod tests {
 
         assert_eq!(popup.edit_buffer, "hello ");
         assert_eq!(popup.edit_cursor, 6);
+    }
+
+    #[test]
+    fn resolved_endpoint_preview_uses_uncommitted_model_edit_buffer() {
+        let mut popup = SettingsPopup::from_summarize(None, None);
+        popup.model = "custom/saved".to_string();
+        popup.base_url = "https://gateway.example".to_string();
+        popup.cursor = 0;
+        popup.start_editing();
+        popup.edit_buffer = "custom/draft".to_string();
+
+        let preview = popup.resolved_endpoint_preview();
+
+        assert_eq!(
+            preview,
+            ResolvedEndpointPreview::Ready(
+                "POST https://gateway.example/v1/chat/completions".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn resolved_endpoint_preview_uses_uncommitted_base_url_edit_buffer() {
+        let mut popup = SettingsPopup::from_summarize(None, None);
+        popup.model = "custom/model".to_string();
+        popup.base_url = "https://saved.example".to_string();
+        popup.cursor = 2;
+        popup.start_editing();
+        popup.edit_buffer = "https://draft.example/custom#".to_string();
+
+        let preview = popup.resolved_endpoint_preview();
+
+        assert_eq!(
+            preview,
+            ResolvedEndpointPreview::Ready("POST https://draft.example/custom".to_string())
+        );
+    }
+
+    #[test]
+    fn resolved_endpoint_preview_keeps_actionable_resolution_error() {
+        let mut popup = SettingsPopup::from_summarize(None, None);
+        popup.model = "hntui-issue-25-unknown/model".to_string();
+
+        let preview = popup.resolved_endpoint_preview();
+
+        assert_eq!(
+            preview,
+            ResolvedEndpointPreview::Error(
+                "missing base URL for provider 'hntui-issue-25-unknown'. \
+                 Pass base_url or set HNTUI_ISSUE_25_UNKNOWN_BASE_URL"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn resolved_endpoint_preview_summarizes_additional_models() {
+        let mut popup = SettingsPopup::from_summarize(None, None);
+        popup.model = "custom/first, custom/second, custom/third".to_string();
+        popup.base_url = "https://gateway.example".to_string();
+
+        let preview = popup.resolved_endpoint_preview();
+
+        assert_eq!(
+            preview,
+            ResolvedEndpointPreview::Ready(
+                "POST https://gateway.example/v1/chat/completions (+2 more)".to_string()
+            )
+        );
     }
 }

@@ -42,6 +42,14 @@ The single seam through which every async result re-enters the app loop.
 The staleness stamp on async work; a result whose generation is no longer current is discarded.
 _Avoid_: version, epoch
 
+**ResolvedEndpoint**:
+The exact URL the Summarizer's request will be sent to, derived from the Model's provider prefix and the Base URL.
+_Avoid_: final URL, parsed URL
+
+**ConnectionTest**:
+The settings action that verifies the draft LLM configuration by sending a minimal real request along the Summarizer's exact path.
+_Avoid_: ping, health check (it verifies the full chain, not host liveness)
+
 ### Modules
 
 **CommentLayout**:

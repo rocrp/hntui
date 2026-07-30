@@ -2,19 +2,36 @@ use crate::app::{App, SettingsPopup};
 use crate::ui::theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Duration;
+
+const MAX_POPUP_WIDTH: u16 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SettingsAreas {
+    popup: Rect,
+    content: Rect,
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let Some(popup) = &app.settings_popup else {
         return;
     };
-    let area = frame.area();
-    let Some(popup_rect) = popup_rect(area) else {
+    render_popup(frame, popup);
+}
+
+fn render_popup(frame: &mut Frame, popup: &SettingsPopup) {
+    let Some(areas) = settings_areas(frame.area(), popup) else {
         return;
     };
 
+    frame.render_widget(Clear, areas.popup);
+    frame.render_widget(popup_block().style(theme::POPUP), areas.popup);
+    frame.render_widget(settings_paragraph(popup).style(theme::POPUP), areas.content);
+}
+
+fn settings_paragraph(popup: &SettingsPopup) -> Paragraph<'static> {
     let fields = SettingsPopup::fields();
     let max_label_len = fields
         .iter()
@@ -87,6 +104,17 @@ pub fn render(frame: &mut Frame, app: &App) {
         lines.push(Line::from(Span::styled(format!("  {status}"), theme::HINT)));
     }
 
+    let endpoint = popup.resolved_endpoint_preview();
+    let endpoint_style = if endpoint.is_error() {
+        theme::WARN
+    } else {
+        theme::HINT
+    };
+    lines.push(Line::from(Span::styled(
+        format!("  {}", endpoint.text()),
+        endpoint_style,
+    )));
+
     lines.push(Line::raw(""));
 
     let show_saved = popup
@@ -110,22 +138,33 @@ pub fn render(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    frame.render_widget(Clear, popup_rect);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(",", theme::HEADER));
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(block)
-        .style(theme::POPUP);
-    frame.render_widget(paragraph, popup_rect);
+    Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
 }
 
-pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {
+fn popup_block() -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(",", theme::HEADER))
+}
+
+fn settings_areas(area: Rect, popup: &SettingsPopup) -> Option<SettingsAreas> {
     if area.width < 20 || area.height < 10 {
         return None;
     }
-    let line_count = SettingsPopup::FIELD_COUNT + 6;
-    let desired_width = area.width.min(60);
-    let desired_height = (line_count as u16).saturating_add(2).min(area.height);
-    Some(super::centered(area, desired_width, desired_height))
+    let desired_width = area.width.min(MAX_POPUP_WIDTH);
+    let sizing_popup = Rect::new(0, 0, desired_width, area.height);
+    let content_width = popup_block().inner(sizing_popup).width;
+    let content_height =
+        u16::try_from(settings_paragraph(popup).line_count(content_width)).unwrap_or(u16::MAX);
+    let desired_height = content_height.saturating_add(2).min(area.height);
+    let popup = super::centered(area, desired_width, desired_height);
+    let content = popup_block().inner(popup);
+    Some(SettingsAreas { popup, content })
 }
+
+pub(crate) fn popup_rect(area: Rect, popup: &SettingsPopup) -> Option<Rect> {
+    settings_areas(area, popup).map(|areas| areas.popup)
+}
+
+#[cfg(test)]
+mod render_tests;

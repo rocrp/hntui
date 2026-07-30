@@ -49,9 +49,11 @@ impl App {
                 }
             }
             InputLayer::Settings | InputLayer::SettingsEditor => {
+                let popup = self.settings_popup.as_ref().and_then(|settings| {
+                    crate::ui::settings::popup_rect(self.layout_areas.frame_area, settings)
+                });
                 if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                    && crate::ui::settings::popup_rect(self.layout_areas.frame_area)
-                        .is_some_and(|popup| !rect_contains(popup, col, row))
+                    && popup.is_some_and(|popup| !rect_contains(popup, col, row))
                 {
                     Action::Settings(SettingsAction::CloseAndSave)
                 } else {
