@@ -6,7 +6,8 @@ model = "gemini/gemini-flash-lite-latest"
 # api_key = ""
 
 # Optional base URL override (defaults to provider's standard URL).
-# Useful for proxies or self-hosted endpoints.
+# Useful for proxies or self-hosted endpoints. With base_url set, a bare
+# model name without the provider/ prefix is allowed (e.g. model = "qwen3").
 # base_url = ""
 
 max_comments = 200

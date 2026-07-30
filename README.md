@@ -114,7 +114,10 @@ model = "openai/gpt-4o-mini"
 The `model` field uses smolllm's `provider/model_name` format. Comma-separate
 for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See
 [smolllm-rs](https://github.com/rocrp/smolllm-rs) for the full provider list.
-Optional `base_url` overrides the provider's default endpoint.
+Optional `base_url` overrides the provider's default endpoint. With `base_url`
+set, a bare model name without the `provider/` prefix is also accepted (e.g.
+`model = "qwen3"`); the key must then come from `HNTUI_LLM_API_KEY` or
+`api_key`, and the one `base_url` applies to every leg of a fallback list.
 
 #### Base URL grammar
 
