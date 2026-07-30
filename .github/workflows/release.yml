@@ -22,7 +22,7 @@ jobs:
           version="$(awk '
             /^\[package\]$/ { in_package = 1; next }
             in_package && /^version[[:space:]]*=/ {
-              gsub(/^[^\"]*\"|\".*$/, "")
+              gsub(/^[^"]*"|".*$/, "")
               print
               exit
             }
