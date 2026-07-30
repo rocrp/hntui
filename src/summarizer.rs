@@ -26,6 +26,16 @@ pub(crate) struct LlmSession {
     chunks: BoxStream<'static, LlmResult<SummaryChunk>>,
 }
 
+#[cfg(test)]
+impl LlmSession {
+    pub(crate) fn for_test(model: &str, chunks: Vec<LlmResult<SummaryChunk>>) -> Self {
+        Self {
+            model: model.to_string(),
+            chunks: Box::pin(futures::stream::iter(chunks)),
+        }
+    }
+}
+
 pub(crate) struct SummaryRequest {
     model: String,
     system_prompt: String,
@@ -131,7 +141,7 @@ impl Summarizer {
             let mut session = match llm.start(request).await {
                 Ok(session) => session,
                 Err(error) => {
-                    yield Err(anyhow::Error::new(error));
+                    yield Err(summary_llm_error(error));
                     return;
                 }
             };
@@ -147,7 +157,7 @@ impl Summarizer {
                         reasoning: chunk.reasoning,
                     }),
                     Err(error) => {
-                        yield Err(anyhow::Error::new(error));
+                        yield Err(summary_llm_error(error));
                         return;
                     }
                 }
@@ -155,6 +165,10 @@ impl Summarizer {
             yield Ok(SummaryEvent::Complete);
         })
     }
+}
+
+fn summary_llm_error(error: smolllm::Error) -> anyhow::Error {
+    anyhow::Error::msg(friendly_llm_error(&error, None))
 }
 
 #[derive(Clone)]

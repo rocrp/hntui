@@ -116,6 +116,22 @@ for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See
 [smolllm-rs](https://github.com/rocrp/smolllm-rs) for the full provider list.
 Optional `base_url` overrides the provider's default endpoint.
 
+#### Base URL grammar
+
+For standard and custom OpenAI-compatible routes, `base_url` resolves as follows:
+
+| Behavior | Input `base_url` | Resolved endpoint |
+|----------|------------------|-------------------|
+| Trailing `#`: use the URL verbatim as the full endpoint; remove the marker | `https://gateway.example/openai/chat/completions#` | `https://gateway.example/openai/chat/completions` |
+| Trailing `/`: append `chat/completions` without injecting a version | `https://gateway.example/openai/` | `https://gateway.example/openai/chat/completions` |
+| Final version segment (`/v1`, `/v3`, …): append `/chat/completions` | `https://gateway.example/v3` | `https://gateway.example/v3/chat/completions` |
+| Otherwise: append `/v1/chat/completions` | `https://gateway.example/openai` | `https://gateway.example/openai/v1/chat/completions` |
+
+Built-in Anthropic and Gemini providers retain their provider-specific path
+injection. While editing Model or Base URL, check the live ResolvedEndpoint
+preview for the exact POST URL, then select `[ Test connection ]` to verify the
+draft configuration.
+
 `hntui` auto-loads `~/.env.smolllm` if it exists (process env always wins).
 Pass `--env-file <path>` to load a different file explicitly.
 

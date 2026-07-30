@@ -89,6 +89,11 @@ impl SummaryOverlay {
         self.article_notice.as_deref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn error_message(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
     pub fn handle_event(&mut self, event: SummaryEvent) {
         match event {
             SummaryEvent::Started { model } => self.model_name = model,
