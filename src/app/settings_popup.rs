@@ -2,7 +2,7 @@ use crate::config::{
     default_include_article, default_max_article_chars, default_max_comments, Config,
     SummarizeConfig,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingsField {
@@ -43,6 +43,37 @@ impl SettingsField {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsRow {
+    Field(SettingsField),
+    TestConnection,
+}
+
+impl SettingsRow {
+    const ALL: [Self; 8] = [
+        Self::Field(SettingsField::Model),
+        Self::Field(SettingsField::ApiKey),
+        Self::Field(SettingsField::BaseUrl),
+        Self::Field(SettingsField::MaxComments),
+        Self::Field(SettingsField::IncludeArticle),
+        Self::Field(SettingsField::MaxArticleChars),
+        Self::Field(SettingsField::SystemPrompt),
+        Self::TestConnection,
+    ];
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ConnectionTestState {
+    #[default]
+    Idle,
+    Testing,
+    Success {
+        model: String,
+        ttft: Duration,
+    },
+    Error(String),
+}
+
 pub struct SettingsPopup {
     pub cursor: usize,
     pub editing: bool,
@@ -56,6 +87,7 @@ pub struct SettingsPopup {
     pub max_article_chars: String,
     pub system_prompt: String,
     pub api_key_status: Option<String>,
+    pub(crate) connection_test: ConnectionTestState,
     pub dirty: bool,
     pub saved_at: Option<Instant>,
 }
@@ -80,6 +112,7 @@ impl ResolvedEndpointPreview {
 
 impl SettingsPopup {
     pub const FIELD_COUNT: usize = SettingsField::ALL.len();
+    pub const ROW_COUNT: usize = SettingsRow::ALL.len();
 
     pub fn from_config(config: &Config) -> Self {
         Self::from_summarize(config.summarize(), config.effective_api_key().status())
@@ -100,6 +133,7 @@ impl SettingsPopup {
                 max_article_chars: c.max_article_chars.to_string(),
                 system_prompt: c.system_prompt.clone(),
                 api_key_status,
+                connection_test: ConnectionTestState::Idle,
                 dirty: false,
                 saved_at: None,
             },
@@ -116,6 +150,7 @@ impl SettingsPopup {
                 max_article_chars: default_max_article_chars().to_string(),
                 system_prompt: String::new(),
                 api_key_status,
+                connection_test: ConnectionTestState::Idle,
                 dirty: false,
                 saved_at: None,
             },
@@ -126,8 +161,19 @@ impl SettingsPopup {
         &SettingsField::ALL
     }
 
-    pub(crate) fn selected_field(&self) -> SettingsField {
-        Self::fields()[self.cursor]
+    pub(crate) fn rows() -> &'static [SettingsRow; Self::ROW_COUNT] {
+        &SettingsRow::ALL
+    }
+
+    pub(crate) fn selected_row(&self) -> SettingsRow {
+        Self::rows()[self.cursor]
+    }
+
+    pub(crate) fn selected_field(&self) -> Option<SettingsField> {
+        match self.selected_row() {
+            SettingsRow::Field(field) => Some(field),
+            SettingsRow::TestConnection => None,
+        }
     }
 
     pub(crate) fn field_value(&self, field: SettingsField) -> &str {
@@ -143,7 +189,7 @@ impl SettingsPopup {
     }
 
     fn draft_field_value(&self, field: SettingsField) -> &str {
-        if self.editing && self.selected_field() == field {
+        if self.editing && self.selected_field() == Some(field) {
             &self.edit_buffer
         } else {
             self.field_value(field)
@@ -185,14 +231,19 @@ impl SettingsPopup {
     }
 
     pub fn start_editing(&mut self) {
+        let field = self
+            .selected_field()
+            .expect("connection-test row cannot enter text editing");
         self.editing = true;
-        self.edit_buffer = self.field_value(self.selected_field()).to_string();
+        self.edit_buffer = self.field_value(field).to_string();
         self.edit_cursor = self.edit_buffer.chars().count();
     }
 
     pub fn confirm_edit(&mut self) {
         let val = self.edit_buffer.clone();
-        let field = self.selected_field();
+        let field = self
+            .selected_field()
+            .expect("settings edit completed without an editable field");
         if self.field_value(field) != val {
             *self.field_mut(field) = val;
             self.dirty = true;
@@ -393,5 +444,16 @@ mod tests {
                 "POST https://gateway.example/v1/chat/completions (+2 more)".to_string()
             )
         );
+    }
+
+    #[test]
+    fn connection_test_is_the_eighth_non_editable_settings_row() {
+        let mut popup = SettingsPopup::from_summarize(None, None);
+
+        assert_eq!(SettingsPopup::rows().len(), 8);
+        popup.cursor = 7;
+        assert_eq!(popup.selected_row(), SettingsRow::TestConnection);
+        assert_eq!(popup.selected_field(), None);
+        assert_eq!(popup.connection_test, ConnectionTestState::Idle);
     }
 }

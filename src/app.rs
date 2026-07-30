@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::input::KeyState;
 use crate::logging;
 use crate::state::StateStore;
-use crate::summarizer::{Summarizer, SummaryEvent};
+use crate::summarizer::{ConnectionTestError, ConnectionTestSuccess, Summarizer, SummaryEvent};
 use crate::ui::summary_overlay::{SummaryOverlay, SummaryState};
 use crate::Cli;
 use ratatui::layout::Rect;
@@ -28,6 +28,7 @@ mod prefetch;
 mod run;
 mod search;
 mod settings_actions;
+mod settings_connection;
 mod settings_popup;
 mod stories;
 #[cfg(test)]
@@ -40,6 +41,7 @@ use self::prefetch::PrefetchCache;
 pub use self::run::run;
 use self::search::SavedStories;
 pub use self::settings_popup::SettingsPopup;
+pub(crate) use self::settings_popup::{ConnectionTestState, SettingsRow};
 use crate::tasks::TaskLifecycle;
 pub(crate) use crate::tasks::{TaskId, TaskTarget};
 use crate::ui::article_overlay::ArticleOverlay;
@@ -85,6 +87,10 @@ pub enum AppEvent {
     SettingsSaved {
         task: TaskId,
         config: Config,
+    },
+    ConnectionTestFinished {
+        task: TaskId,
+        result: Result<ConnectionTestSuccess, ConnectionTestError>,
     },
     TaskCompleted {
         task: TaskId,
@@ -304,6 +310,7 @@ impl App {
                         | TaskTarget::CommentChildren(_)
                         | TaskTarget::Article(_)
                         | TaskTarget::Summary
+                        | TaskTarget::ConnectionTest
                         | TaskTarget::SettingsSave
                 )
             }) > 0

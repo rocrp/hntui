@@ -18,6 +18,7 @@ fn make_popup(model: &str, base_url: &str) -> SettingsPopup {
         max_article_chars: "20000".to_string(),
         system_prompt: String::new(),
         api_key_status: None,
+        connection_test: crate::app::ConnectionTestState::Idle,
         dirty: false,
         saved_at: None,
     }
@@ -135,4 +136,60 @@ fn api_key_provenance_and_resolved_endpoint_share_the_status_area() {
     let (_, endpoint_row) = find_text(&buffer, area, "POST https://", key_row);
 
     assert_eq!(endpoint_row, key_row + 1);
+}
+
+#[test]
+fn connection_test_is_rendered_as_the_eighth_navigable_row() {
+    let mut popup = make_popup("custom/model", "https://gateway.example");
+    popup.cursor = 7;
+
+    let (buffer, area) = render_test_popup(&popup, 120, 30);
+    let (column, row) = find_text(&buffer, area, "> [ Test connection ]", area.top());
+
+    assert_eq!(buffer[(column, row)].fg, theme::MAUVE);
+}
+
+#[test]
+fn connection_test_states_use_their_semantic_styles() {
+    let cases = [
+        (
+            crate::app::ConnectionTestState::Testing,
+            "testing…".to_string(),
+            theme::SUBTEXT0,
+        ),
+        (
+            crate::app::ConnectionTestState::Success {
+                model: "fallback/served-model".to_string(),
+                ttft: Duration::from_millis(125),
+            },
+            "ok · fallback/served-model · 125ms".to_string(),
+            theme::GREEN,
+        ),
+        (
+            crate::app::ConnectionTestState::Error("check API key · invalid token".to_string()),
+            "check API key · invalid token".to_string(),
+            theme::RED,
+        ),
+    ];
+
+    for (state, expected, color) in cases {
+        let mut popup = make_popup("custom/model", "https://gateway.example");
+        popup.connection_test = state;
+        let (buffer, area) = render_test_popup(&popup, 120, 30);
+        let (column, row) = find_text(&buffer, area, &expected, area.top());
+        assert_eq!(buffer[(column, row)].fg, color, "for {expected}");
+    }
+}
+
+#[test]
+fn a_bounded_connection_error_wraps_to_at_most_three_lines() {
+    let mut popup = make_popup("custom/model", "https://gateway.example");
+    popup.connection_test =
+        crate::app::ConnectionTestState::Error(format!("check API key · {}END", "x".repeat(120)));
+
+    let (buffer, area) = render_test_popup(&popup, 70, 40);
+    let (_, start_row) = find_text(&buffer, area, "✗ check API key", area.top());
+    let (_, end_row) = find_text(&buffer, area, "END", start_row);
+
+    assert!(end_row - start_row <= 2);
 }

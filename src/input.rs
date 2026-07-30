@@ -62,7 +62,7 @@ pub enum FeedFilterAction {
 pub enum SettingsAction {
     MoveDown,
     MoveUp,
-    StartEditing,
+    Activate,
     CloseAndSave,
     Edit(TextAction),
 }
@@ -172,6 +172,14 @@ mod routing_tests {
         assert_eq!(
             KeyState::default().on_key(InputLayer::SettingsEditor, key(KeyCode::Char('界')),),
             Action::Settings(SettingsAction::Edit(TextAction::Insert('界')))
+        );
+    }
+
+    #[test]
+    fn enter_activates_the_selected_settings_row() {
+        assert_eq!(
+            KeyState::default().on_key(InputLayer::Settings, key(KeyCode::Enter)),
+            Action::Settings(SettingsAction::Activate)
         );
     }
 
@@ -452,7 +460,7 @@ impl KeyState {
                 (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
                     Action::Settings(SettingsAction::MoveUp)
                 }
-                (KeyCode::Enter, _) => Action::Settings(SettingsAction::StartEditing),
+                (KeyCode::Enter, _) => Action::Settings(SettingsAction::Activate),
                 (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
                     Action::Settings(SettingsAction::CloseAndSave)
                 }

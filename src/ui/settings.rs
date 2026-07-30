@@ -1,4 +1,4 @@
-use crate::app::{App, SettingsPopup};
+use crate::app::{App, ConnectionTestState, SettingsPopup, SettingsRow};
 use crate::ui::theme;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span, Text};
@@ -43,60 +43,71 @@ fn settings_paragraph(popup: &SettingsPopup) -> Paragraph<'static> {
     lines.push(Line::from(Span::styled("Settings", theme::HEADER)));
     lines.push(Line::raw(""));
 
-    for (i, field) in fields.iter().copied().enumerate() {
+    for (i, row) in SettingsPopup::rows().iter().copied().enumerate() {
         let is_cursor = i == popup.cursor;
-        let is_editing = is_cursor && popup.editing;
         let marker = if is_cursor { "> " } else { "  " };
-        let padded_label = format!("{:width$}", field.label(), width = max_label_len);
-        let value = popup.field_value(field);
+        match row {
+            SettingsRow::Field(field) => {
+                let is_editing = is_cursor && popup.editing;
+                let padded_label = format!("{:width$}", field.label(), width = max_label_len);
+                let value = popup.field_value(field);
+                let display_value = if is_editing {
+                    String::new()
+                } else if field.is_secret() && !value.is_empty() {
+                    if value.len() > 4 {
+                        format!("{}...{}", &value[..2], &value[value.len() - 2..])
+                    } else {
+                        "*".repeat(value.len())
+                    }
+                } else {
+                    value.to_string()
+                };
+                let style = if is_editing {
+                    theme::SUCCESS
+                } else if is_cursor {
+                    theme::ACCENT
+                } else {
+                    theme::LABEL
+                };
 
-        let display_value = if is_editing {
-            String::new()
-        } else if field.is_secret() && !value.is_empty() {
-            if value.len() > 4 {
-                format!("{}...{}", &value[..2], &value[value.len() - 2..])
-            } else {
-                "*".repeat(value.len())
+                if is_editing {
+                    let buf = &popup.edit_buffer;
+                    let pos = popup.edit_cursor;
+                    let chars: Vec<char> = buf.chars().collect();
+                    let before: String = chars[..pos].iter().collect();
+                    let (cursor_char, after) = if pos < chars.len() {
+                        (
+                            chars[pos].to_string(),
+                            chars[pos + 1..].iter().collect::<String>(),
+                        )
+                    } else {
+                        (" ".to_string(), String::new())
+                    };
+
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{marker}{padded_label}: "), style),
+                        Span::styled(before, theme::SUCCESS),
+                        Span::styled(cursor_char, theme::BLOCK_CURSOR),
+                        Span::styled(after, theme::SUCCESS),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{marker}{padded_label}: "), style),
+                        Span::styled(display_value, theme::VALUE),
+                    ]));
+                }
             }
-        } else {
-            value.to_string()
-        };
-
-        let style = if is_editing {
-            theme::SUCCESS
-        } else if is_cursor {
-            theme::ACCENT
-        } else {
-            theme::LABEL
-        };
-
-        if is_editing {
-            let buf = &popup.edit_buffer;
-            let pos = popup.edit_cursor;
-            let chars: Vec<char> = buf.chars().collect();
-            let before: String = chars[..pos].iter().collect();
-            let cursor_char: String;
-            let after: String;
-
-            if pos < chars.len() {
-                cursor_char = chars[pos].to_string();
-                after = chars[pos + 1..].iter().collect();
-            } else {
-                cursor_char = " ".to_string();
-                after = String::new();
+            SettingsRow::TestConnection => {
+                let style = if is_cursor {
+                    theme::ACCENT
+                } else {
+                    theme::LABEL
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("{marker}[ Test connection ]"),
+                    style,
+                )));
             }
-
-            lines.push(Line::from(vec![
-                Span::styled(format!("{marker}{padded_label}: "), style),
-                Span::styled(before, theme::SUCCESS),
-                Span::styled(cursor_char, theme::BLOCK_CURSOR),
-                Span::styled(after, theme::SUCCESS),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{marker}{padded_label}: "), style),
-                Span::styled(display_value, theme::VALUE),
-            ]));
         }
     }
 
@@ -115,6 +126,23 @@ fn settings_paragraph(popup: &SettingsPopup) -> Paragraph<'static> {
         endpoint_style,
     )));
 
+    match &popup.connection_test {
+        ConnectionTestState::Idle => {}
+        ConnectionTestState::Testing => {
+            lines.push(Line::from(Span::styled("  ⏳ testing…", theme::HINT)))
+        }
+        ConnectionTestState::Success { model, ttft } => {
+            lines.push(Line::from(Span::styled(
+                format!("  ✓ ok · {model} · {}", format_ttft(*ttft)),
+                theme::SUCCESS,
+            )));
+        }
+        ConnectionTestState::Error(message) => lines.push(Line::from(Span::styled(
+            format!("  ✗ {message}"),
+            theme::ERROR,
+        ))),
+    }
+
     lines.push(Line::raw(""));
 
     let show_saved = popup
@@ -132,13 +160,21 @@ fn settings_paragraph(popup: &SettingsPopup) -> Paragraph<'static> {
             Span::styled("j/k", theme::KEY),
             Span::styled(":nav  ", theme::HINT),
             Span::styled("Enter", theme::KEY),
-            Span::styled(":edit  ", theme::HINT),
+            Span::styled(":activate  ", theme::HINT),
             Span::styled("Esc/q", theme::KEY),
             Span::styled(":close", theme::HINT),
         ]));
     }
 
     Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
+}
+
+fn format_ttft(ttft: Duration) -> String {
+    if ttft < Duration::from_secs(1) {
+        format!("{}ms", ttft.as_millis())
+    } else {
+        format!("{:.1}s", ttft.as_secs_f64())
+    }
 }
 
 fn popup_block() -> Block<'static> {

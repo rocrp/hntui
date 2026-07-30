@@ -1,4 +1,4 @@
-use super::{App, AppEvent, SettingsPopup};
+use super::{App, AppEvent, SettingsPopup, SettingsRow};
 use crate::api::FeedKind;
 use crate::app::TaskTarget;
 use crate::config::{default_system_prompt, ConfigEdits, SummarizeConfig};
@@ -56,6 +56,7 @@ impl App {
     pub(super) fn handle_settings_action(&mut self, action: SettingsAction) {
         match action {
             SettingsAction::CloseAndSave => {
+                self.cancel_connection_test();
                 self.save_settings();
                 self.settings_popup = None;
             }
@@ -67,7 +68,7 @@ impl App {
                 step_bounded(
                     &mut popup.cursor,
                     CursorStep::Next,
-                    SettingsPopup::FIELD_COUNT,
+                    SettingsPopup::ROW_COUNT,
                 );
             }
             SettingsAction::MoveUp => {
@@ -78,19 +79,32 @@ impl App {
                 step_bounded(
                     &mut popup.cursor,
                     CursorStep::Previous,
-                    SettingsPopup::FIELD_COUNT,
+                    SettingsPopup::ROW_COUNT,
                 );
             }
-            SettingsAction::StartEditing => self
-                .settings_popup
-                .as_mut()
-                .expect("settings action without popup")
-                .start_editing(),
+            SettingsAction::Activate => {
+                let selected = self
+                    .settings_popup
+                    .as_ref()
+                    .expect("settings action without popup")
+                    .selected_row();
+                match selected {
+                    SettingsRow::Field(_) => {
+                        self.cancel_connection_test();
+                        self.settings_popup
+                            .as_mut()
+                            .expect("settings action without popup")
+                            .start_editing();
+                    }
+                    SettingsRow::TestConnection => self.start_connection_test(),
+                }
+            }
             SettingsAction::Edit(action) => self.handle_settings_text_action(action),
         }
     }
 
     fn handle_settings_text_action(&mut self, action: TextAction) {
+        self.cancel_connection_test();
         let save = {
             let popup = self
                 .settings_popup

@@ -15,6 +15,7 @@ pub(crate) enum TaskTarget {
     CommentChildren(u64),
     Article(u64),
     Summary,
+    ConnectionTest,
     SettingsSave,
     StoryStateSave,
 }

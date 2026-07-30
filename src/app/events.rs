@@ -77,6 +77,9 @@ impl App {
                 }
                 self.last_error = None;
             }
+            AppEvent::ConnectionTestFinished { task, result } => {
+                self.handle_connection_test_finished(task, result);
+            }
             AppEvent::TaskCompleted { task } => {
                 self.tasks.finish(task);
             }
@@ -207,6 +210,9 @@ impl App {
             }
             TaskTarget::Article(story_id) => self.deliver_article(story_id, Err(message)),
             TaskTarget::Summary => self.summary_overlay.fail(message),
+            TaskTarget::ConnectionTest => {
+                unreachable!("ConnectionTest reports typed result events: {message}")
+            }
             TaskTarget::SettingsSave => {
                 self.last_error = Some(format!("settings: {message}"));
             }
