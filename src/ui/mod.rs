@@ -118,7 +118,7 @@ pub(crate) const FALLBACK_DOMAIN_ICON: &str = "\u{f0ac}";
 pub(crate) fn domain_icon(domain: &str) -> Option<&'static str> {
     const NEWS: &str = "\u{f1ea}";
     const ACADEMIC: &str = "\u{f02d}";
-    const AI: &str = "\u{f544}";
+    const AI: &str = "\u{ee0d}";
     const GITHUB: &str = "\u{f09b}";
     const GOOGLE: &str = "\u{f1a0}";
     const APPLE: &str = "\u{f179}";
@@ -134,10 +134,10 @@ pub(crate) fn domain_icon(domain: &str) -> Option<&'static str> {
         "github.com" | "github.blog" | "gist.github.com" => GITHUB,
         "gitlab.com" => "\u{f296}",
         "bitbucket.org" => "\u{f171}",
-        "codeberg.org" => "\u{f1d3}",
+        "codeberg.org" => "\u{f330}",
 
         // Video
-        "youtube.com" | "youtu.be" => "\u{f167}",
+        "youtube.com" | "youtu.be" => "\u{f16a}",
         "twitch.tv" => "\u{f1e8}",
 
         // Social
@@ -326,6 +326,11 @@ mod tests {
     }
 
     #[test]
+    fn domain_icon_codeberg() {
+        assert_eq!(domain_icon("codeberg.org"), Some("\u{f330}"));
+    }
+
+    #[test]
     fn domain_icon_news_bucket() {
         assert_eq!(domain_icon("theguardian.com"), Some("\u{f1ea}"));
         assert_eq!(domain_icon("ft.com"), Some("\u{f1ea}"));
@@ -341,8 +346,15 @@ mod tests {
 
     #[test]
     fn domain_icon_ai_labs() {
-        assert_eq!(domain_icon("anthropic.com"), Some("\u{f544}"));
-        assert_eq!(domain_icon("huggingface.co"), Some("\u{f544}"));
+        assert_eq!(domain_icon("anthropic.com"), Some("\u{ee0d}"));
+        assert_eq!(domain_icon("huggingface.co"), Some("\u{ee0d}"));
+    }
+
+    #[test]
+    fn domain_icon_video_sites() {
+        assert_eq!(domain_icon("youtube.com"), Some("\u{f16a}"));
+        assert_eq!(domain_icon("youtu.be"), Some("\u{f16a}"));
+        assert_eq!(domain_icon("twitch.tv"), Some("\u{f1e8}"));
     }
 
     #[test]

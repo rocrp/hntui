@@ -173,6 +173,9 @@ just build
 just screenshots
 ```
 
+Screenshot generation requires VHS, ImageMagick (`magick`), fontconfig
+(`fc-match`), and `CaskaydiaCove Nerd Font Mono`.
+
 Cut and publish a release through the canonical release script:
 
 ```bash
