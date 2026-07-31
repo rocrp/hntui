@@ -161,3 +161,23 @@ bin = "localwebrs"        # override if it is not on PATH
 Without localwebrs, `hntui` works as before: `v` reports the missing binary, and
 `s` summarizes the comments alone with a banner saying the article was skipped.
 Self-posts need no subprocess at all.
+
+## Development
+
+Requires [just](https://github.com/casey/just) 1.52 or newer. Run `just` to list
+the available project actions. Common commands:
+
+```bash
+just check
+just build
+just screenshots
+```
+
+Cut and publish a release through the canonical release script:
+
+```bash
+just release 0.5.2
+```
+
+This requires a clean working tree and creates the release commit and tag before
+atomically pushing both.
