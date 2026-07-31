@@ -13,8 +13,6 @@ pub(crate) enum ArticleRequest {
     Ready(Article),
     /// A subprocess is running; the result arrives as an AppEvent.
     Fetching,
-    /// Nothing to fetch: no link and no body.
-    Unavailable,
 }
 
 impl App {
@@ -30,12 +28,6 @@ impl App {
         if let Some(article) = self.local_article(story) {
             self.articles.insert(story_id, article.clone());
             return ArticleRequest::Ready(article);
-        }
-
-        // Nothing local to show. A job posting has neither a link nor a body
-        // and no discussion to hide one in, so there is nothing to ask for.
-        if story.url.is_none() && story.comment_count == 0 && story.kids.is_empty() {
-            return ArticleRequest::Unavailable;
         }
 
         if self.tasks.is_running(TaskTarget::Article(story_id)) {
@@ -84,13 +76,15 @@ impl App {
             TaskTarget::Article(story_id),
             async move {
                 let thread = source.comment_roots(story).await?;
-                body_article(&title, thread.text.as_deref())
-                    .ok_or_else(|| anyhow::anyhow!("story has no article"))
+                Ok::<_, anyhow::Error>(body_article(&title, thread.text.as_deref()))
             },
-            move |task, article| AppEvent::ArticleLoaded {
-                task,
-                story_id,
-                article,
+            move |task, article| match article {
+                Some(article) => AppEvent::ArticleLoaded {
+                    task,
+                    story_id,
+                    article,
+                },
+                None => AppEvent::ArticleUnavailable { task, story_id },
             },
         );
     }
@@ -104,15 +98,16 @@ impl App {
         match self.request_article(story) {
             ArticleRequest::Ready(article) => self.article_overlay.show(story, article),
             ArticleRequest::Fetching => self.article_overlay.begin(story),
-            ArticleRequest::Unavailable => self
-                .article_overlay
-                .show_error(story, "story has no article".to_string()),
         }
     }
 
     /// Fan a settled fetch out to whoever is waiting on it. Both the overlay
     /// and a pending summarize can be waiting on the same fetch.
-    pub(super) fn deliver_article(&mut self, story_id: u64, result: Result<Article, String>) {
+    pub(super) fn deliver_article(
+        &mut self,
+        story_id: u64,
+        result: Result<Option<Article>, String>,
+    ) {
         if let Err(message) = &result {
             logging::log_error(format!(
                 "article fetch failed story_id={story_id}: {message}"
@@ -121,7 +116,10 @@ impl App {
 
         if self.article_overlay.is_visible() && self.article_overlay.story_id() == story_id {
             match result.clone() {
-                Ok(article) => self.article_overlay.finish(article),
+                Ok(Some(article)) => self.article_overlay.finish(article),
+                Ok(None) => self
+                    .article_overlay
+                    .fail("story has no article".to_string()),
                 Err(message) => self.article_overlay.fail(message),
             }
         }

@@ -54,7 +54,14 @@ impl App {
                 }
                 assert_eq!(task.target(), TaskTarget::Article(story_id));
                 self.articles.insert(story_id, article.clone());
-                self.deliver_article(story_id, Ok(article));
+                self.deliver_article(story_id, Ok(Some(article)));
+            }
+            AppEvent::ArticleUnavailable { task, story_id } => {
+                if !self.tasks.finish(task) {
+                    return;
+                }
+                assert_eq!(task.target(), TaskTarget::Article(story_id));
+                self.deliver_article(story_id, Ok(None));
             }
             AppEvent::Summary { task, event } => {
                 if !self.tasks.is_current(task) {

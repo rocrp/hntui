@@ -2,7 +2,6 @@ use super::{App, AppEvent, TaskTarget, View};
 use crate::api::{DiskCacheConfig, FeedKind, HnClient, SearchClient, Sources};
 use crate::article::ArticleFetcher;
 use crate::config::Config;
-use crate::logging;
 use crate::state::StateStore;
 use crate::summarizer::Summarizer;
 use crate::tui::Tui;
@@ -14,6 +13,12 @@ use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+fn prepare_article_cache_dir(dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("create article cache dir {}", dir.display()))?;
+    Ok(dir.to_path_buf())
+}
 
 pub async fn run(cli: Cli, config: Config) -> Result<()> {
     let resolved_cache_dir = match cli.file_cache_dir.clone() {
@@ -55,16 +60,8 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
     // has to exist up front: a missing `current_dir` fails the spawn with the
     // same ENOENT a missing binary would, which would misreport as "install
     // localwebrs". Independent of --no-file-cache, which is about HN items.
-    let article_dir = std::fs::create_dir_all(&resolved_cache_dir)
-        .map(|()| resolved_cache_dir.clone())
-        .map_err(|error| {
-            logging::log_error(format!(
-                "article cache dir unavailable {}: {error}",
-                resolved_cache_dir.display()
-            ));
-        })
-        .ok();
-    let article_fetcher = ArticleFetcher::new(config.article_bin(), article_dir);
+    let article_dir = prepare_article_cache_dir(&resolved_cache_dir)?;
+    let article_fetcher = ArticleFetcher::new(config.article_bin(), Some(article_dir));
     let sources = Sources::new(Arc::new(client), Arc::new(search));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
@@ -151,4 +148,24 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_uncreatable_article_cache_directory_is_fatal() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let file = temp.path().join("not-a-directory");
+        std::fs::write(&file, "occupied").expect("create blocking file");
+
+        let error = prepare_article_cache_dir(&file.join("cache"))
+            .expect_err("a file cannot contain the article cache");
+
+        assert!(
+            error.to_string().contains("create article cache dir"),
+            "unexpected error: {error:#}"
+        );
+    }
 }

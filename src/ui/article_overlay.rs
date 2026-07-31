@@ -52,13 +52,6 @@ impl ArticleOverlay {
         self.finish(article);
     }
 
-    /// Open straight into the error state — nothing to fetch, or a fetch that
-    /// failed before the overlay existed.
-    pub fn show_error(&mut self, story: &Story, message: String) {
-        self.reset_for(story);
-        self.fail(message);
-    }
-
     pub fn finish(&mut self, article: Article) {
         self.state = ArticleState::Done;
         self.article_title = article.title;
@@ -230,7 +223,7 @@ pub fn render(frame: &mut Frame, overlay: &ArticleOverlay, spinner: char) {
         .and_then(super::domain_from_url)
         .unwrap_or_else(|| "self".to_string());
     let title = match overlay.state {
-        ArticleState::Loading => format!(" Article {spinner} ({source}) "),
+        ArticleState::Loading => format!(" {} {spinner} ({source}) ", overlay.story_title),
         ArticleState::Done => format!(" {} ({source}) ", overlay.story_title),
         ArticleState::Error => format!(" {} — no article ({source}) ", overlay.story_title),
         ArticleState::Idle => return,

@@ -129,7 +129,8 @@ fn dismissing_returns_the_overlay_to_idle() {
 #[test]
 fn an_error_overlay_is_scrollable_and_keeps_the_story_link() {
     let mut overlay = ArticleOverlay::default();
-    overlay.show_error(&story(), "localwebrs not found — install it".to_string());
+    overlay.begin(&story());
+    overlay.fail("localwebrs not found — install it".to_string());
 
     assert_eq!(overlay.state(), ArticleState::Error);
     assert_eq!(overlay.story_url(), Some("https://example.com/post"));
@@ -198,10 +199,15 @@ fn the_loading_line_shows_elapsed_seconds_and_how_to_cancel() {
     overlay.begin(&story());
 
     let (buffer, areas) = render_overlay(&mut overlay, 60, 15);
+    let title: String = (areas.popup.left()..areas.popup.right())
+        .map(|column| buffer[(column, areas.popup.top())].symbol().to_string())
+        .collect();
     let first_line: String = (areas.content.left()..areas.content.right())
         .map(|column| buffer[(column, areas.content.top())].symbol().to_string())
         .collect();
 
+    assert!(title.contains("A story"), "unexpected title: {title:?}");
+    assert!(title.contains("example.com"), "unexpected title: {title:?}");
     assert!(
         first_line.contains("fetching article… 0s"),
         "unexpected loading line: {first_line:?}"

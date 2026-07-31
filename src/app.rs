@@ -15,6 +15,8 @@ use tokio::sync::mpsc;
 
 mod actions;
 #[cfg(test)]
+mod article_summary_tests;
+#[cfg(test)]
 mod article_tests;
 mod articles;
 mod comment_tree;
@@ -82,6 +84,10 @@ pub enum AppEvent {
         story_id: u64,
         article: Article,
     },
+    ArticleUnavailable {
+        task: TaskId,
+        story_id: u64,
+    },
     Summary {
         task: TaskId,
         event: SummaryEvent,
@@ -122,6 +128,7 @@ pub enum CommentLoadKind {
 pub(crate) struct PendingSummary {
     story_id: u64,
     comments_ready: bool,
+    owns_comments_task: bool,
     article: ArticleLeg,
 }
 

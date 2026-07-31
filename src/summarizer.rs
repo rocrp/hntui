@@ -44,6 +44,13 @@ pub(crate) struct SummaryRequest {
     base_url: Option<String>,
 }
 
+#[cfg(test)]
+impl SummaryRequest {
+    pub(crate) fn user_prompt(&self) -> &str {
+        &self.user_prompt
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SummaryChunk {
     pub content: String,

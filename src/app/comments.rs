@@ -310,7 +310,7 @@ impl App {
 
         // Comments are not in hand: the load and the article fetch run in
         // parallel, and `begin_summary` shows the overlay while they settle.
-        self.begin_summary(story.clone(), false);
+        self.begin_summary(story.clone(), false, true);
         self.load_comments_for_story(story, false);
     }
 
@@ -319,15 +319,20 @@ impl App {
             self.summary_overlay.fail("No story selected".to_string());
             return;
         };
-        self.begin_summary(story, true);
+        // An empty Comments view can still be waiting on its foreground load.
+        // Reuse that task, but do not let dismissing the summary cancel work
+        // owned by the view.
+        let comments_ready = !self.comment_loading || !self.comment_list.is_empty();
+        self.begin_summary(story, comments_ready, false);
     }
 
-    fn begin_summary(&mut self, story: Story, comments_ready: bool) {
+    fn begin_summary(&mut self, story: Story, comments_ready: bool, owns_comments_task: bool) {
         self.summary_overlay.begin(&story, self.comment_list.len());
         let article = self.plan_article_leg(&story);
         self.pending_summary = Some(PendingSummary {
             story_id: story.id,
             comments_ready,
+            owns_comments_task,
             article,
         });
         self.run_or_await_pending_summary();
@@ -348,7 +353,6 @@ impl App {
         match self.request_article(story) {
             ArticleRequest::Ready(article) => ArticleLeg::Ready(Some(article.content)),
             ArticleRequest::Fetching => ArticleLeg::Pending,
-            ArticleRequest::Unavailable => ArticleLeg::Ready(None),
         }
     }
 
@@ -356,7 +360,7 @@ impl App {
     pub(super) fn settle_pending_summary_article(
         &mut self,
         story_id: u64,
-        result: Result<Article, String>,
+        result: Result<Option<Article>, String>,
     ) {
         let Some(pending) = self.pending_summary.as_mut() else {
             return;
@@ -365,7 +369,8 @@ impl App {
             return;
         }
         pending.article = match result {
-            Ok(article) => ArticleLeg::Ready(Some(article.content)),
+            Ok(Some(article)) => ArticleLeg::Ready(Some(article.content)),
+            Ok(None) => ArticleLeg::Ready(None),
             Err(message) => ArticleLeg::Failed(message),
         };
         self.run_or_await_pending_summary();
@@ -399,6 +404,13 @@ impl App {
             return;
         };
         self.cancel_article_fetch(pending.story_id);
+        if pending.owns_comments_task
+            && self
+                .tasks
+                .cancel(TaskTarget::CommentRoots(pending.story_id))
+        {
+            self.comment_loading = false;
+        }
     }
 
     /// Send the summarize once both legs have settled; otherwise say what the

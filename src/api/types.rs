@@ -108,10 +108,14 @@ pub struct WebStory {
 
 impl From<WebStory> for Story {
     fn from(ws: WebStory) -> Self {
+        let internal_url = format!("item?id={}", ws.id);
         Self {
             id: ws.id,
             title: ws.title,
-            url: ws.url,
+            // node-hnapi uses its relative discussion URL when a submission
+            // has no external link. That is where HackerWeb exposes the
+            // self-post body, not a page for localwebrs to visit.
+            url: ws.url.filter(|url| url != &internal_url),
             // The feed listing carries no self-post body; it arrives with the
             // discussion (`/item/:id`) as a StoryThread.
             text: None,
@@ -376,6 +380,44 @@ mod tests {
         };
 
         assert_eq!(thread.text.as_deref(), Some("<p>the body"));
+    }
+
+    #[test]
+    fn hackerweb_internal_discussion_url_is_not_an_article_link() {
+        let payload = r#"{
+            "id": 7,
+            "title": "Ask HN: anything?",
+            "url": "item?id=7",
+            "points": 1,
+            "user": "alice",
+            "time": 1,
+            "comments_count": 0,
+            "type": "ask"
+        }"#;
+        let listed: WebStory = serde_json::from_str(payload).expect("decode hackerweb listing");
+
+        let story = Story::from(listed);
+
+        assert_eq!(story.url, None);
+    }
+
+    #[test]
+    fn hackerweb_external_article_url_survives_the_listing_conversion() {
+        let payload = r#"{
+            "id": 7,
+            "title": "A linked article",
+            "url": "https://example.com/article",
+            "points": 1,
+            "user": "alice",
+            "time": 1,
+            "comments_count": 0,
+            "type": "link"
+        }"#;
+        let listed: WebStory = serde_json::from_str(payload).expect("decode hackerweb listing");
+
+        let story = Story::from(listed);
+
+        assert_eq!(story.url.as_deref(), Some("https://example.com/article"));
     }
 
     #[test]
