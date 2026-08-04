@@ -163,7 +163,7 @@ impl App {
                         } else {
                             hn_url()
                         };
-                        crate::browser::open_url(&url)
+                        self.url_opener.open(&url)
                     });
                 let opened = match result {
                     Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {

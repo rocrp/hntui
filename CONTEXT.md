@@ -29,6 +29,10 @@ _Avoid_: comment roots (that is only half of it), discussion
 The original content a Story points to — the extracted text of the linked page, or the story's own body for a self-post.
 _Avoid_: page, webpage (an Article is extracted text, not the rendered page), original text
 
+**Article Link**:
+A navigable HTTP(S) destination embedded in an Article, distinct from the Story's original URL.
+_Avoid_: source link, hyperlink
+
 ### Interaction
 
 **Action**:
@@ -68,4 +72,4 @@ The seam that obtains an Article for a Story. Adapters at this seam: the localwe
 _Avoid_: visitor, scraper (localwebrs vocabulary; the seam is hntui's)
 
 **ArticleOverlay**:
-The view that presents an Article — scrolling, copying, opening the original in the browser.
+The view that presents an Article — scrolling, copying, selecting and opening Article Links, and opening the Story's original URL.

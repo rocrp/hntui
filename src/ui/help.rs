@@ -139,8 +139,10 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     lines.push(kv("j/k, ↓/↑", "scroll"));
     lines.push(kv("gg, G", "top / bottom"));
     lines.push(kv("Ctrl+d / Ctrl+u", "page down / up"));
+    lines.push(kv("Tab / Shift+Tab", "next / previous article link"));
+    lines.push(kv("Enter", "open selected article link (browser)"));
     lines.push(kv("c", "copy article to clipboard"));
-    lines.push(kv("o", "open the original (browser)"));
+    lines.push(kv("o", "open Story's original URL (browser)"));
     lines.push(kv("q / Esc", "close (cancels a running fetch)"));
     lines
 }

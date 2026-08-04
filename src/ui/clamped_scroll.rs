@@ -39,6 +39,21 @@ impl ClampedScroll {
         self.offset = self.max_offset();
     }
 
+    pub(super) fn reveal(&mut self, first_row: usize, last_row: usize) {
+        if self.viewport_height == 0 {
+            return;
+        }
+        let link_height = last_row.saturating_sub(first_row).saturating_add(1);
+        if link_height > self.viewport_height || first_row < self.offset {
+            self.offset = first_row;
+        } else if last_row >= self.offset.saturating_add(self.viewport_height) {
+            self.offset = last_row
+                .saturating_add(1)
+                .saturating_sub(self.viewport_height);
+        }
+        self.clamp();
+    }
+
     pub(super) fn page_amount(&self) -> usize {
         self.viewport_height.saturating_sub(2).max(1)
     }

@@ -21,6 +21,7 @@ fn article(content: &str) -> Article {
     Article {
         title: Some("Extracted title".to_string()),
         content: content.to_string(),
+        effective_url: None,
     }
 }
 
@@ -55,6 +56,15 @@ fn render_overlay(
     (terminal.backend().buffer().clone(), areas)
 }
 
+fn area_text(buffer: &Buffer, area: Rect) -> String {
+    (area.top()..area.bottom())
+        .flat_map(|row| {
+            (area.left()..area.right())
+                .map(move |column| buffer[(column, row)].symbol().to_string())
+        })
+        .collect::<String>()
+}
+
 #[test]
 fn scrolling_stops_when_the_last_wrapped_line_reaches_the_viewport_bottom() {
     let mut overlay = done_overlay("one\n\ntwo\n\nthree\n\nfour");
@@ -77,6 +87,107 @@ fn viewport_resize_reflows_content_and_reclamps_the_offset() {
 
     assert_eq!(overlay.wrapped_line_count(), 1);
     assert_eq!(overlay.scroll_offset(), 0);
+}
+
+#[test]
+fn selecting_an_article_link_scrolls_it_into_view() {
+    let content = format!(
+        "{}\n\n[target-link](https://target.example)",
+        many_paragraphs(8)
+    );
+    let mut overlay = done_overlay(&content);
+    let (before, areas) = render_overlay(&mut overlay, 40, 10);
+    let visible_text = |buffer: &Buffer| {
+        (areas.content.top()..areas.content.bottom())
+            .flat_map(|row| {
+                (areas.content.left()..areas.content.right())
+                    .map(move |column| buffer[(column, row)].symbol().to_string())
+            })
+            .collect::<String>()
+    };
+    assert!(!visible_text(&before).contains("target-link"));
+
+    overlay.select_next_link();
+    let (after, _) = render_overlay(&mut overlay, 40, 10);
+
+    assert!(visible_text(&after).contains("target-link"));
+}
+
+#[test]
+fn an_inline_code_label_remains_a_selectable_article_link() {
+    let mut overlay = done_overlay("[`target`](https://target.example)");
+    overlay.set_viewport(20, 2);
+
+    overlay.select_next_link();
+
+    assert_eq!(overlay.selected_link(), Some("https://target.example/"));
+}
+
+#[test]
+fn zero_width_links_are_skipped_during_navigation() {
+    let mut overlay =
+        done_overlay("[](https://invisible.example) [target](https://target.example)");
+    overlay.set_viewport(40, 2);
+
+    overlay.select_next_link();
+
+    assert_eq!(overlay.selected_link(), Some("https://target.example/"));
+}
+
+#[test]
+fn control_only_links_are_skipped_during_navigation() {
+    let mut overlay =
+        done_overlay("[\u{0007}](https://control.example) [target](https://target.example)");
+    overlay.set_viewport(40, 2);
+
+    overlay.select_next_link();
+
+    assert_eq!(overlay.selected_link(), Some("https://target.example/"));
+}
+
+#[test]
+fn linked_articles_show_link_navigation_in_the_footer() {
+    let mut overlay = done_overlay("Read [target](https://target.example)");
+
+    let (buffer, areas) = render_overlay(&mut overlay, 140, 20);
+    let hint = area_text(&buffer, areas.hint);
+
+    assert!(
+        hint.contains("Tab/Shift+Tab: links"),
+        "footer was: {hint:?}"
+    );
+    assert!(hint.contains("Enter: open"), "footer was: {hint:?}");
+    assert!(hint.contains("o: original"), "footer was: {hint:?}");
+}
+
+#[test]
+fn selected_link_target_is_visible_before_opening() {
+    let mut overlay = done_overlay("Read [target](https://target.example/path)");
+    render_overlay(&mut overlay, 140, 20);
+    overlay.select_next_link();
+
+    let (buffer, areas) = render_overlay(&mut overlay, 140, 20);
+    let hint = area_text(&buffer, areas.hint);
+
+    assert!(
+        hint.starts_with("https://target.example/path"),
+        "footer was: {hint:?}"
+    );
+}
+
+#[test]
+fn manual_scrolling_clears_article_link_selection() {
+    let mut overlay = done_overlay(&format!(
+        "[target](https://target.example)\n\n{}",
+        many_paragraphs(8)
+    ));
+    overlay.set_viewport(20, 3);
+    overlay.select_next_link();
+    assert!(overlay.selected_link().is_some());
+
+    overlay.scroll_down(1);
+
+    assert_eq!(overlay.selected_link(), None);
 }
 
 #[test]
@@ -161,6 +272,7 @@ fn front_matter_falls_back_to_the_story_title_when_extraction_found_none() {
         Article {
             title: None,
             content: "body".to_string(),
+            effective_url: None,
         },
     );
 

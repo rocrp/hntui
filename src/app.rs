@@ -1,5 +1,6 @@
 use crate::api::{CommentNode, FeedKind, Sources, Story, StoryThread};
 use crate::article::{Article, ArticleFetcher};
+use crate::browser::{SystemUrlOpener, UrlOpener};
 use crate::config::Config;
 use crate::input::KeyState;
 use crate::logging;
@@ -10,6 +11,7 @@ use crate::Cli;
 use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -188,6 +190,7 @@ pub struct App {
     prefetched_comments_cache: PrefetchCache,
     article_fetcher: ArticleFetcher,
     articles: ArticleStore,
+    url_opener: Arc<dyn UrlOpener>,
     summarizer: Summarizer,
     pub summary_overlay: SummaryOverlay,
     pub article_overlay: ArticleOverlay,
@@ -265,6 +268,7 @@ impl App {
             prefetched_comments_cache: PrefetchCache::new(PREFETCH_CACHE_CAP),
             article_fetcher,
             articles: ArticleStore::new(ARTICLE_CACHE_CAP),
+            url_opener: Arc::new(SystemUrlOpener),
             summarizer,
             summary_overlay: SummaryOverlay::default(),
             article_overlay: ArticleOverlay::default(),
@@ -290,6 +294,12 @@ impl App {
 
             seen_story_ids: HashSet::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_url_opener(mut self, url_opener: Arc<dyn UrlOpener>) -> Self {
+        self.url_opener = url_opener;
+        self
     }
 
     pub fn spinner_frame(&self) -> char {

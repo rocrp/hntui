@@ -65,9 +65,13 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `j/k`, `↓/↑` | Scroll |
 | `gg` / `G` | Top / bottom |
 | `Ctrl+d/u`, `PgDn/PgUp` | Page down / up |
+| `Tab` / `Shift+Tab` | Select next / previous article link |
+| `Enter` | Open selected article link (browser) |
 | `c` | Copy article to clipboard |
-| `o` | Open the original (browser) |
+| `o` | Open the Story's original URL (browser) |
 | `q`, `Esc` | Close (cancels a running fetch) |
+
+The selected link target appears in the footer before opening.
 
 **Touch / Mouse** (Termux, etc.)
 

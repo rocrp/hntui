@@ -128,6 +128,12 @@ pub(crate) const QUOTE_BAR: Style = Style::new().fg(OVERLAY0);
 pub(crate) const CODE: Style = Style::new().fg(TEAL);
 /// List bullet / number
 pub(crate) const LIST_MARKER: Style = Style::new().fg(BLUE);
+/// Focused Article Link
+pub(crate) const ARTICLE_LINK_SELECTED: Style = Style::new()
+    .fg(SURFACE2)
+    .bg(BLUE)
+    .add_modifier(Modifier::BOLD)
+    .add_modifier(Modifier::UNDERLINED);
 /// Block cursor in editing mode
 pub(crate) const BLOCK_CURSOR: Style = Style::new().fg(SURFACE2).bg(GREEN);
 

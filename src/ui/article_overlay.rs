@@ -19,6 +19,12 @@ pub enum ArticleState {
     Error,
 }
 
+#[derive(Clone, Copy)]
+enum LinkDirection {
+    Next,
+    Previous,
+}
+
 #[derive(Default)]
 pub struct ArticleOverlay {
     state: ArticleState,
@@ -33,8 +39,13 @@ pub struct ArticleOverlay {
     copied_flash: Option<Instant>,
     story_title: String,
     story_url: Option<String>,
+    /// Base for resolving links embedded in the Article. This may differ from
+    /// `story_url` after redirects; `story_url` remains the target for `o`.
+    link_base_url: Option<String>,
     story_id: u64,
     story_time: i64,
+    links: Vec<String>,
+    selected_link: Option<usize>,
 }
 
 impl ArticleOverlay {
@@ -56,6 +67,14 @@ impl ArticleOverlay {
         self.state = ArticleState::Done;
         self.article_title = article.title;
         self.content = article.content;
+        self.link_base_url = article
+            .effective_url
+            .or_else(|| self.story_url.clone())
+            .or_else(|| Some(overlay::hn_url(self.story_id)));
+        self.links =
+            markdown::render_markdown_document(&self.content, self.link_base_url.as_deref(), None)
+                .links;
+        self.selected_link = None;
         self.error = None;
         self.started_at = None;
         self.scroll.go_top();
@@ -65,6 +84,8 @@ impl ArticleOverlay {
     pub fn fail(&mut self, message: String) {
         self.state = ArticleState::Error;
         self.error = Some(message);
+        self.links.clear();
+        self.selected_link = None;
         self.started_at = None;
         self.scroll.go_top();
         self.reflow();
@@ -78,6 +99,10 @@ impl ArticleOverlay {
         *self = Self {
             story_title: story.title.clone(),
             story_url: story.url.clone(),
+            link_base_url: story
+                .url
+                .clone()
+                .or_else(|| Some(overlay::hn_url(story.id))),
             story_id: story.id,
             story_time: story.time,
             ..Self::default()
@@ -85,25 +110,75 @@ impl ArticleOverlay {
     }
 
     pub fn scroll_down(&mut self, amount: usize) {
+        self.selected_link = None;
         self.scroll.scroll_down(amount);
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
+        self.selected_link = None;
         self.scroll.scroll_up(amount);
     }
 
     pub fn go_top(&mut self) {
+        self.selected_link = None;
         self.scroll.go_top();
     }
 
     pub fn go_bottom(&mut self) {
+        self.selected_link = None;
         self.scroll.go_bottom();
     }
 
+    pub fn select_next_link(&mut self) {
+        self.cycle_link(LinkDirection::Next);
+    }
+
+    pub fn select_previous_link(&mut self) {
+        self.cycle_link(LinkDirection::Previous);
+    }
+
+    fn cycle_link(&mut self, direction: LinkDirection) {
+        if self.links.is_empty() {
+            return;
+        }
+        let start = match (self.selected_link, direction) {
+            (Some(selected), LinkDirection::Next) => (selected + 1) % self.links.len(),
+            (Some(selected), LinkDirection::Previous) => {
+                selected.checked_sub(1).unwrap_or(self.links.len() - 1)
+            }
+            (None, LinkDirection::Next) => 0,
+            (None, LinkDirection::Previous) => self.links.len() - 1,
+        };
+        for distance in 0..self.links.len() {
+            let candidate = match direction {
+                LinkDirection::Next => (start + distance) % self.links.len(),
+                LinkDirection::Previous => (start + self.links.len() - distance) % self.links.len(),
+            };
+            if self.select_renderable_link(candidate) {
+                return;
+            }
+        }
+        self.selected_link = None;
+    }
+
+    pub fn selected_link(&self) -> Option<&str> {
+        self.selected_link
+            .and_then(|selected| self.links.get(selected))
+            .map(String::as_str)
+    }
+
     pub fn set_viewport(&mut self, width: u16, height: u16) {
+        let width_changed = self.viewport_width != width;
+        let height_changed = self.scroll.viewport_height() != usize::from(height);
+        if !width_changed && !height_changed {
+            return;
+        }
         self.viewport_width = width;
         self.scroll.set_viewport_height(usize::from(height));
-        self.reflow();
+        if width_changed {
+            self.reflow();
+        }
+        self.reveal_selected_link();
     }
 
     pub fn page_scroll_amount(&self) -> usize {
@@ -144,6 +219,36 @@ impl ArticleOverlay {
         self.scroll.set_content_height(wrapped_line_count);
     }
 
+    fn reveal_selected_link(&mut self) {
+        let Some(selected) = self.selected_link else {
+            return;
+        };
+        let Some(rows) = markdown::link_row_range(
+            &self.content,
+            self.link_base_url.as_deref(),
+            selected,
+            self.viewport_width,
+        ) else {
+            self.selected_link = None;
+            return;
+        };
+        self.scroll.reveal(*rows.start(), *rows.end());
+    }
+
+    fn select_renderable_link(&mut self, candidate: usize) -> bool {
+        let Some(rows) = markdown::link_row_range(
+            &self.content,
+            self.link_base_url.as_deref(),
+            candidate,
+            self.viewport_width,
+        ) else {
+            return false;
+        };
+        self.selected_link = Some(candidate);
+        self.scroll.reveal(*rows.start(), *rows.end());
+        true
+    }
+
     fn render_scroll_offset(&self) -> u16 {
         self.scroll.render_offset()
     }
@@ -179,7 +284,14 @@ impl ArticleOverlay {
                 ),
                 theme::HINT,
             ))],
-            ArticleState::Done => markdown::render_markdown(&self.content),
+            ArticleState::Done => {
+                markdown::render_markdown_document(
+                    &self.content,
+                    self.link_base_url.as_deref(),
+                    self.selected_link,
+                )
+                .lines
+            }
             ArticleState::Error => vec![Line::from(Span::styled(
                 self.error.as_deref().unwrap_or("Unknown error").to_string(),
                 theme::ERROR,
@@ -245,10 +357,18 @@ pub fn render(frame: &mut Frame, overlay: &ArticleOverlay, spinner: char) {
     let hint = if overlay::copied_recently(overlay.copied_flash) {
         Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else {
-        let text = match overlay.state {
-            ArticleState::Done => "j/k: scroll  c: copy  o: browser  q/Esc: close",
-            ArticleState::Error => "o: browser  q/Esc: close",
-            _ => "q/Esc: cancel",
+        let text = if let Some(url) = overlay.selected_link() {
+            format!("{url}  Enter: open  Tab/Shift+Tab: links  o: original")
+        } else {
+            match overlay.state {
+                ArticleState::Done if !overlay.links.is_empty() => {
+                    "j/k: scroll  Tab/Shift+Tab: links  Enter: open  c: copy  o: original  q/Esc: close"
+                }
+                ArticleState::Done => "j/k: scroll  c: copy  o: original  q/Esc: close",
+                ArticleState::Error => "o: original  q/Esc: close",
+                _ => "q/Esc: cancel",
+            }
+            .to_string()
         };
         Line::from(Span::styled(text, theme::HINT))
     };

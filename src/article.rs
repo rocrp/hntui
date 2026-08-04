@@ -5,12 +5,13 @@
 //! `docs/adr/20260725-article-fetch-via-localwebrs-subprocess.md`.
 
 use crate::api::Story;
-use crate::text::hn_html_to_plain;
+use crate::text::hn_html_to_article_markdown;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
+use url::Url;
 
 /// Cache TTL handed to localwebrs. Its `--cache` defaults to 0 (off), so this
 /// must be passed explicitly for a `v` press to be free the second time.
@@ -31,6 +32,9 @@ const INSTALL_HINT: &str =
 pub struct Article {
     pub title: Option<String>,
     pub content: String,
+    /// Final URL reported by localwebrs after redirects. Relative links in the
+    /// extracted Markdown resolve against this URL, not the original Story URL.
+    pub effective_url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -76,6 +80,8 @@ impl std::error::Error for ArticleError {}
 /// unknown fields are ignored so an upstream addition is not a breakage.
 #[derive(Debug, Deserialize)]
 struct VisitOutput {
+    #[serde(default)]
+    url: Option<String>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
@@ -162,11 +168,11 @@ impl ArticleFetcher {
             });
         }
 
-        parse_visit_output(&output.stdout)
+        parse_visit_output(&output.stdout, &url)
     }
 }
 
-fn parse_visit_output(stdout: &[u8]) -> Result<Article, ArticleError> {
+fn parse_visit_output(stdout: &[u8], requested_url: &str) -> Result<Article, ArticleError> {
     let visit: VisitOutput =
         serde_json::from_slice(stdout).map_err(|error| ArticleError::Failed {
             message: format!("could not read localwebrs output: {error}"),
@@ -177,6 +183,7 @@ fn parse_visit_output(stdout: &[u8]) -> Result<Article, ArticleError> {
         .map(|content| content.trim().to_string())
         .filter(|content| !content.is_empty())
         .ok_or(ArticleError::NoContent)?;
+    let effective_url = normalize_effective_url(visit.url, requested_url)?;
 
     Ok(Article {
         title: visit
@@ -184,7 +191,39 @@ fn parse_visit_output(stdout: &[u8]) -> Result<Article, ArticleError> {
             .map(|title| title.trim().to_string())
             .filter(|title| !title.is_empty()),
         content,
+        effective_url,
     })
+}
+
+fn normalize_effective_url(
+    reported_url: Option<String>,
+    requested_url: &str,
+) -> Result<Option<String>, ArticleError> {
+    let candidate = reported_url
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .or_else(|| {
+            let requested_url = requested_url.trim();
+            (!requested_url.is_empty()).then(|| requested_url.to_string())
+        });
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+    let url = Url::parse(&candidate).map_err(|error| ArticleError::Failed {
+        message: format!("localwebrs returned an invalid effective URL: {error}"),
+    })?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(ArticleError::Failed {
+            message:
+                "localwebrs returned an invalid effective URL: expected credential-free HTTP(S)"
+                    .to_string(),
+        });
+    }
+    Ok(Some(url.into()))
 }
 
 fn exit_message(status: &std::process::ExitStatus, stderr: &[u8]) -> String {
@@ -211,10 +250,11 @@ pub fn self_post_article(story: &Story) -> Option<Article> {
 /// Turn an HN self-post body into an Article. Separate from `self_post_article`
 /// because the body sometimes arrives on a StoryThread rather than the Story.
 pub fn body_article(title: &str, body: Option<&str>) -> Option<Article> {
-    let content = hn_html_to_plain(body?);
+    let content = hn_html_to_article_markdown(body?);
     (!content.trim().is_empty()).then(|| Article {
         title: Some(title.to_string()),
         content,
+        effective_url: None,
     })
 }
 
@@ -252,11 +292,16 @@ mod tests {
         let article = parse_visit_output(
             br#"{"url":"https://example.com/","title":"Example","content":"body text",
                  "extra":{"sitename":"example.com"},"future_field":42}"#,
+            "https://requested.example/",
         )
         .expect("well-formed visit output");
 
         assert_eq!(article.title.as_deref(), Some("Example"));
         assert_eq!(article.content, "body text");
+        assert_eq!(
+            article.effective_url.as_deref(),
+            Some("https://example.com/")
+        );
     }
 
     #[test]
@@ -267,7 +312,7 @@ mod tests {
             br#"{"title":"Example","content":"   \n "}"#.as_slice(),
         ] {
             assert!(matches!(
-                parse_visit_output(payload),
+                parse_visit_output(payload, "https://example.com"),
                 Err(ArticleError::NoContent)
             ));
         }
@@ -275,7 +320,8 @@ mod tests {
 
     #[test]
     fn garbage_output_reports_a_read_failure() {
-        let error = parse_visit_output(b"not json at all").expect_err("garbage must not parse");
+        let error = parse_visit_output(b"not json at all", "https://example.com")
+            .expect_err("garbage must not parse");
 
         assert!(
             matches!(&error, ArticleError::Failed { message } if message.contains("localwebrs output")),
@@ -285,11 +331,32 @@ mod tests {
 
     #[test]
     fn a_content_only_payload_still_yields_an_article() {
-        let article =
-            parse_visit_output(br#"{"content":"body"}"#).expect("title is optional upstream");
+        let article = parse_visit_output(
+            br#"{"url":"  ","content":"body"}"#,
+            "https://requested.example/path",
+        )
+        .expect("title is optional upstream");
 
         assert_eq!(article.title, None);
         assert_eq!(article.content, "body");
+        assert_eq!(
+            article.effective_url.as_deref(),
+            Some("https://requested.example/path")
+        );
+    }
+
+    #[test]
+    fn malformed_effective_url_is_a_clear_extraction_failure() {
+        let error = parse_visit_output(
+            br#"{"url":"not a URL","content":"body"}"#,
+            "https://requested.example/path",
+        )
+        .expect_err("malformed final URL must fail at the extraction boundary");
+
+        assert!(
+            matches!(&error, ArticleError::Failed { message } if message.contains("effective URL")),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]
@@ -376,14 +443,17 @@ mod tests {
     }
 
     #[test]
-    fn a_self_post_body_resolves_locally_as_plain_text() {
+    fn a_self_post_body_preserves_links_as_markdown() {
         let article = self_post_article(&story_with_text(Some(
-            "<p>Hello&nbsp;world</p><p>second <a href=\"x\">link</a></p>",
+            "<p>Hello&nbsp;world</p><p>second <a href=\"https:&#x2F;&#x2F;example.com&#x2F;docs\">link</a></p>",
         )))
         .expect("self-post has an article");
 
         assert_eq!(article.title.as_deref(), Some("Ask HN: anything?"));
-        assert_eq!(article.content, "Hello world\n\nsecond link");
+        assert_eq!(
+            article.content,
+            "Hello world\n\nsecond [link](https://example.com/docs)"
+        );
     }
 
     #[test]

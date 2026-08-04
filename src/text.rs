@@ -1,4 +1,57 @@
-use html_escape::decode_html_entities;
+use html_escape::{decode_html_entities, encode_text};
+use regex::{Captures, Regex};
+use std::sync::LazyLock;
+
+static HN_ANCHOR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>(.*?)</a\s*>"#)
+        .expect("HN anchor regex must compile")
+});
+
+/// Preserve the one piece of HN's sanitized HTML that Article navigation
+/// needs, then reuse the plain-text normalization used elsewhere.
+pub(crate) fn hn_html_to_article_markdown(html: &str) -> String {
+    let markdown = HN_ANCHOR_RE.replace_all(html, |captures: &Captures<'_>| {
+        let encoded_href = captures
+            .get(1)
+            .or_else(|| captures.get(2))
+            .expect("anchor regex must capture href")
+            .as_str();
+        let label_html = captures
+            .get(3)
+            .expect("anchor regex must capture label")
+            .as_str();
+
+        let label = escape_markdown_label(&hn_html_to_plain(label_html));
+        let label = encode_text(&label);
+        let href = decode_html_entities(encoded_href);
+        let href = escape_markdown_destination(&href);
+        let href = encode_text(&href);
+        format!("[{label}]({href})")
+    });
+    hn_html_to_plain(&markdown)
+}
+
+fn escape_markdown_label(label: &str) -> String {
+    let mut escaped = String::with_capacity(label.len());
+    for character in label.chars() {
+        if character.is_ascii_punctuation() {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+fn escape_markdown_destination(destination: &str) -> String {
+    let mut escaped = String::with_capacity(destination.len());
+    for character in destination.chars() {
+        if matches!(character, '\\' | '(' | ')') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
 
 pub(crate) fn hn_html_to_plain(html: &str) -> String {
     let html = html
@@ -71,6 +124,20 @@ mod tests {
     fn keeps_link_text_and_strips_tags() {
         let html = r#"Read <a href="https://example.com">this</a> &gt; that"#;
         assert_eq!(hn_html_to_plain(html), "Read this > that");
+    }
+
+    #[test]
+    fn article_markdown_preserves_hn_anchor_targets() {
+        let html = concat!(
+            "<p>Read <a href=\"https:&#x2F;&#x2F;example.com&#x2F;docs?a=1&amp;b=2\" ",
+            "rel=\"nofollow\"><code>the docs</code></a>.</p>",
+            "<p>Then continue.</p>"
+        );
+
+        assert_eq!(
+            hn_html_to_article_markdown(html),
+            "Read [the docs](https://example.com/docs?a=1&b=2).\n\nThen continue."
+        );
     }
 
     #[test]

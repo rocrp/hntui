@@ -46,6 +46,9 @@ pub enum ArticleAction {
     GoBottom,
     Copy,
     OpenBrowser,
+    SelectNextLink,
+    SelectPreviousLink,
+    OpenSelectedLink,
     OpenHelp,
 }
 
@@ -268,6 +271,11 @@ impl KeyState {
             | (KeyCode::Char('G'), KeyModifiers::NONE) => Action::Article(ArticleAction::GoBottom),
             (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Article(ArticleAction::Copy),
             (KeyCode::Char('o'), KeyModifiers::NONE) => Action::Article(ArticleAction::OpenBrowser),
+            (KeyCode::BackTab, _) | (KeyCode::Tab, KeyModifiers::SHIFT) => {
+                Action::Article(ArticleAction::SelectPreviousLink)
+            }
+            (KeyCode::Tab, KeyModifiers::NONE) => Action::Article(ArticleAction::SelectNextLink),
+            (KeyCode::Enter, _) => Action::Article(ArticleAction::OpenSelectedLink),
             _ => Action::Noop,
         }
     }

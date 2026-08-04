@@ -1,14 +1,23 @@
 use super::tests::{cli, comment, key, story, test_article_fetcher};
 use super::*;
 use crate::api::{InMemorySource, Sources};
+use crate::browser::{RecordingUrlOpener, UrlOpener};
 use crate::config::Config;
-use crate::input::InputLayer;
+use crate::input::{Action, InputLayer};
 use crate::summarizer::Summarizer;
 use crate::ui::article_overlay::ArticleState;
 use crossterm::event::KeyCode;
+use ratatui::layout::Rect;
 use std::sync::Arc;
 
 fn app_with_stories(stories: Vec<Story>) -> (App, mpsc::UnboundedReceiver<AppEvent>) {
+    app_with_stories_and_opener(stories, Arc::new(RecordingUrlOpener::default()))
+}
+
+fn app_with_stories_and_opener(
+    stories: Vec<Story>,
+    url_opener: Arc<dyn UrlOpener>,
+) -> (App, mpsc::UnboundedReceiver<AppEvent>) {
     let source = Arc::new(InMemorySource::new(stories.clone()));
     let sources = Sources::new(source.clone(), source);
     let (tx, rx) = mpsc::unbounded_channel();
@@ -23,10 +32,109 @@ fn app_with_stories(stories: Vec<Story>) -> (App, mpsc::UnboundedReceiver<AppEve
         config,
         summarizer,
         article_fetcher,
-    );
+    )
+    .with_url_opener(url_opener);
     let story_ids = stories.iter().map(|story| story.id).collect();
     app.restore_story_list_state(story_ids, stories, None);
     (app, rx)
+}
+
+#[test]
+fn v_then_tab_enter_opens_the_embedded_article_link_once() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let target = "https://target.example/path";
+    let item = linked_story(1);
+    let story_url = item.url.clone().expect("linked story URL");
+    let (mut app, _rx) = app_with_stories_and_opener(vec![item], opener.clone());
+    app.articles.insert(
+        1,
+        crate::article::Article {
+            title: None,
+            content: format!("Read [the target]({target})"),
+            effective_url: None,
+        },
+    );
+
+    app.handle_action(Action::ViewArticle);
+    assert_eq!(app.article_overlay.state(), ArticleState::Done);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(opener.opened_urls(), vec![target.to_string()]);
+    assert_ne!(target, story_url);
+}
+
+#[test]
+fn article_link_selection_skips_unsafe_targets_and_resolves_relative_urls() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let (mut app, _rx) = app_with_stories_and_opener(vec![linked_story(1)], opener.clone());
+    app.articles.insert(
+        1,
+        crate::article::Article {
+            title: None,
+            content: "[unsafe](javascript:alert(1)) [safe](next)".to_string(),
+            effective_url: None,
+        },
+    );
+
+    app.handle_action(Action::ViewArticle);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        opener.opened_urls(),
+        vec!["https://example.com/next".to_string()]
+    );
+}
+
+#[test]
+fn shift_tab_starts_at_the_last_article_link() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let (mut app, _rx) = app_with_stories_and_opener(vec![linked_story(1)], opener.clone());
+    app.articles.insert(
+        1,
+        crate::article::Article {
+            title: None,
+            content: "[first](https://first.example) [last](https://last.example)".to_string(),
+            effective_url: None,
+        },
+    );
+
+    app.handle_action(Action::ViewArticle);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::BackTab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        opener.opened_urls(),
+        vec!["https://last.example/".to_string()]
+    );
+}
+
+#[test]
+fn relative_article_links_use_the_effective_fetched_url() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let (mut app, _rx) = app_with_stories_and_opener(vec![linked_story(1)], opener.clone());
+    app.articles.insert(
+        1,
+        crate::article::Article {
+            title: None,
+            content: "[target](../next)".to_string(),
+            effective_url: Some("https://redirected.example/articles/current".to_string()),
+        },
+    );
+
+    app.handle_action(Action::ViewArticle);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        opener.opened_urls(),
+        vec!["https://redirected.example/next".to_string()]
+    );
 }
 
 pub(super) fn linked_story(id: u64) -> Story {
@@ -50,6 +158,42 @@ fn v_on_a_self_post_renders_its_body_without_spawning_a_fetch() {
     assert_eq!(app.input_layer(), InputLayer::Article);
     assert_eq!(app.article_overlay.state(), ArticleState::Done);
     assert!(!app.tasks.is_running(TaskTarget::Article(1)));
+}
+
+#[test]
+fn v_then_tab_enter_opens_a_link_from_a_self_post() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let target = "https://target.example/self-post";
+    let body = concat!(
+        "<p>Try <a href=\"https:&#x2F;&#x2F;target.example&#x2F;self-post\" ",
+        "rel=\"nofollow\">this link</a>.</p>"
+    );
+    let (mut app, _rx) = app_with_stories_and_opener(vec![self_post(1, body)], opener.clone());
+
+    app.handle_action(Action::ViewArticle);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(opener.opened_urls(), vec![target.to_string()]);
+}
+
+#[test]
+fn self_post_link_labels_cannot_replace_the_anchor_target() {
+    let opener = Arc::new(RecordingUrlOpener::default());
+    let target = "https://target.example/safe";
+    let body = concat!(
+        "<p><a href=\"https:&#x2F;&#x2F;target.example&#x2F;safe\">",
+        "click &#93;(javascript:alert(1))</a></p>"
+    );
+    let (mut app, _rx) = app_with_stories_and_opener(vec![self_post(1, body)], opener.clone());
+
+    app.handle_action(Action::ViewArticle);
+    app.prepare_frame(Rect::new(0, 0, 80, 24));
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(opener.opened_urls(), vec![target.to_string()]);
 }
 
 #[tokio::test]
@@ -114,6 +258,7 @@ async fn a_second_v_on_the_same_story_serves_the_stored_article() {
         article: crate::article::Article {
             title: Some("T".to_string()),
             content: "stored body".to_string(),
+            effective_url: None,
         },
     });
     app.handle_key(key(KeyCode::Esc));

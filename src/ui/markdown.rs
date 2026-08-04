@@ -1,9 +1,46 @@
+use std::ops::RangeInclusive;
+
 use crate::ui::theme;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use ratatui::style::{Modifier, Style};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
+use unicode_width::UnicodeWidthStr;
+use url::{ParseError, Url};
+
+const LINK_PROBE_BACKGROUND: Color = Color::Rgb(1, 2, 3);
+const LINK_PROBE_STYLE: Style = Style::new().bg(LINK_PROBE_BACKGROUND);
 
 pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
+    render_markdown_document(input, None, None).lines
+}
+
+pub struct MarkdownDocument {
+    pub lines: Vec<Line<'static>>,
+    pub links: Vec<String>,
+}
+
+pub fn render_markdown_document(
+    input: &str,
+    base_url: Option<&str>,
+    selected_link: Option<usize>,
+) -> MarkdownDocument {
+    render_markdown_document_with_style(
+        input,
+        base_url,
+        selected_link,
+        theme::ARTICLE_LINK_SELECTED,
+    )
+}
+
+fn render_markdown_document_with_style(
+    input: &str,
+    base_url: Option<&str>,
+    selected_link: Option<usize>,
+    selected_link_style: Style,
+) -> MarkdownDocument {
     let opts = Options::ENABLE_STRIKETHROUGH;
     let parser = Parser::new_ext(input, opts);
 
@@ -15,6 +52,8 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
     let mut list_index_stack: Vec<Option<u64>> = Vec::new();
     let mut in_code_block = false;
     let mut need_paragraph_break = false;
+    let mut links = Vec::new();
+    let mut active_link = None;
 
     let base_style = Style::default().fg(theme::TEXT);
 
@@ -93,9 +132,18 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 }
                 Tag::Link { dest_url, .. } => {
                     let top = current_style(&style_stack, base_style);
-                    let link_style = top.fg(theme::BLUE).add_modifier(Modifier::UNDERLINED);
+                    let link_index = resolve_article_link(&dest_url, base_url).map(|url| {
+                        let index = links.len();
+                        links.push(url);
+                        index
+                    });
+                    let link_style = match link_index {
+                        Some(index) if selected_link == Some(index) => selected_link_style,
+                        Some(_) => top.fg(theme::BLUE).add_modifier(Modifier::UNDERLINED),
+                        None => top,
+                    };
+                    active_link = link_index;
                     style_stack.push(link_style);
-                    let _ = dest_url;
                 }
                 _ => {}
             },
@@ -134,6 +182,7 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 }
                 TagEnd::Link => {
                     style_stack.pop();
+                    active_link = None;
                 }
                 _ => {}
             },
@@ -159,10 +208,15 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
                 }
             }
             Event::Code(code) => {
-                current_spans.push(Span::styled(format!("`{code}`"), theme::CODE));
+                let style = if active_link.is_some() {
+                    current_style(&style_stack, base_style)
+                } else {
+                    theme::CODE
+                };
+                current_spans.push(Span::styled(format!("`{code}`"), style));
             }
             Event::SoftBreak => {
-                current_spans.push(Span::raw(" "));
+                current_spans.push(Span::styled(" ", current_style(&style_stack, base_style)));
             }
             Event::HardBreak => {
                 flush_line(&mut lines, &mut current_spans, &prefix_spans);
@@ -180,7 +234,67 @@ pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
     }
 
     flush_line(&mut lines, &mut current_spans, &prefix_spans);
-    lines
+    MarkdownDocument { lines, links }
+}
+
+fn resolve_article_link(destination: &str, base_url: Option<&str>) -> Option<String> {
+    let url = match Url::parse(destination) {
+        Ok(url) => url,
+        Err(ParseError::RelativeUrlWithoutBase) => {
+            Url::parse(base_url?).ok()?.join(destination).ok()?
+        }
+        Err(_) => return None,
+    };
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    Some(url.into())
+}
+
+pub fn link_row_range(
+    input: &str,
+    base_url: Option<&str>,
+    link_index: usize,
+    width: u16,
+) -> Option<RangeInclusive<usize>> {
+    if width == 0 {
+        return None;
+    }
+    let document =
+        render_markdown_document_with_style(input, base_url, Some(link_index), LINK_PROBE_STYLE);
+    document.links.get(link_index)?;
+    let paragraph = Paragraph::new(document.lines).wrap(Wrap { trim: false });
+    let height = u16::try_from(paragraph.line_count(width))
+        .expect("article rendered height exceeds ratatui's u16 limit");
+    if height == 0 {
+        return None;
+    }
+
+    let area = Rect::new(0, 0, width, height);
+    let mut buffer = Buffer::empty(area);
+    paragraph.render(area, &mut buffer);
+
+    let mut first = None;
+    let mut last = None;
+    for row in 0..height {
+        let contains_link = (0..width).any(|column| {
+            let cell = &buffer[(column, row)];
+            cell.bg == LINK_PROBE_BACKGROUND
+                && UnicodeWidthStr::width(cell.symbol()) > 0
+                && cell
+                    .symbol()
+                    .chars()
+                    .any(|character| !character.is_control())
+        });
+        if contains_link {
+            first.get_or_insert(usize::from(row));
+            last = Some(usize::from(row));
+        }
+    }
+    Some(first?..=last.expect("first selected-link row has a last row"))
 }
 
 fn current_style(stack: &[Style], base: Style) -> Style {

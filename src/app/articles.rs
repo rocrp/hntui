@@ -151,6 +151,9 @@ impl App {
                 }
             }
             ArticleAction::OpenBrowser => self.open_article_source_in_browser(),
+            ArticleAction::SelectNextLink => self.article_overlay.select_next_link(),
+            ArticleAction::SelectPreviousLink => self.article_overlay.select_previous_link(),
+            ArticleAction::OpenSelectedLink => self.open_selected_article_link(),
             ArticleAction::OpenHelp => self.help_overlay.open(),
         }
     }
@@ -166,7 +169,18 @@ impl App {
                     self.article_overlay.story_id()
                 )
             });
-        match crate::browser::open_url(&url) {
+        self.open_article_url(&url);
+    }
+
+    fn open_selected_article_link(&mut self) {
+        let Some(url) = self.article_overlay.selected_link().map(str::to_string) else {
+            return;
+        };
+        self.open_article_url(&url);
+    }
+
+    fn open_article_url(&mut self, url: &str) {
+        match self.url_opener.open(url) {
             Ok(crate::browser::OpenOutcome::CopiedToClipboard) => {
                 self.copied_flash = Some(std::time::Instant::now());
             }
@@ -219,6 +233,7 @@ mod tests {
         Article {
             title: None,
             content: marker.to_string(),
+            effective_url: None,
         }
     }
 

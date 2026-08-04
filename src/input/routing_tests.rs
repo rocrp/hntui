@@ -198,6 +198,18 @@ fn article_keys_route_to_article_actions() {
             Action::Article(ArticleAction::OpenBrowser),
         ),
         (
+            key(KeyCode::Tab),
+            Action::Article(ArticleAction::SelectNextLink),
+        ),
+        (
+            key(KeyCode::BackTab),
+            Action::Article(ArticleAction::SelectPreviousLink),
+        ),
+        (
+            key(KeyCode::Enter),
+            Action::Article(ArticleAction::OpenSelectedLink),
+        ),
+        (
             key(KeyCode::Char('q')),
             Action::Article(ArticleAction::Dismiss),
         ),
