@@ -35,6 +35,9 @@ pub struct SummaryOverlay {
     /// Set when the summary went ahead without an Article it should have had.
     article_notice: Option<String>,
     model_name: String,
+    /// The ResolvedModel, when the server named one that differs from what was
+    /// requested.
+    resolved_model: Option<String>,
     copied_flash: Option<Instant>,
     story_title: String,
     story_url: Option<String>,
@@ -56,6 +59,7 @@ impl SummaryOverlay {
         self.waiting_for = None;
         self.article_notice = None;
         self.model_name.clear();
+        self.resolved_model = None;
         self.copied_flash = None;
         self.story_title = story.title.clone();
         self.story_url = story.url.clone();
@@ -96,7 +100,14 @@ impl SummaryOverlay {
 
     pub fn handle_event(&mut self, event: SummaryEvent) {
         match event {
-            SummaryEvent::Started { model } => self.model_name = model,
+            SummaryEvent::Started {
+                model,
+                resolved_model,
+            } => {
+                // Only worth showing when it says something the request did not.
+                self.resolved_model = resolved_model.filter(|resolved| *resolved != model);
+                self.model_name = model;
+            }
             SummaryEvent::Chunk { content, reasoning } => {
                 if !reasoning.is_empty() && !self.content_started {
                     self.reasoning.push_str(&reasoning);
@@ -198,6 +209,15 @@ impl SummaryOverlay {
         self.state != SummaryState::Idle
     }
 
+    /// How the model reads in the title: `requested → resolved` when a proxy or
+    /// alias resolved it to something else, the requested spec alone otherwise.
+    pub(crate) fn model_label(&self) -> String {
+        match &self.resolved_model {
+            Some(resolved) => format!("{} → {resolved}", self.model_name),
+            None => self.model_name.clone(),
+        }
+    }
+
     fn copy_text(&self) -> String {
         let mut output = String::from("---\n");
         output.push_str(&overlay::front_matter_title(&self.story_title));
@@ -209,6 +229,9 @@ impl SummaryOverlay {
         output.push_str(&format!("author: {}\n", self.story_author));
         output.push_str(&format!("comments: {}\n", self.comment_count));
         output.push_str(&format!("model: {}\n", self.model_name));
+        if let Some(resolved) = &self.resolved_model {
+            output.push_str(&format!("resolved_model: {resolved}\n"));
+        }
         output.push_str(&overlay::front_matter_date(self.story_time));
         output.push_str("---\n\n");
         output.push_str(&self.summary);
@@ -289,7 +312,7 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     let model_tag = if overlay.model_name.is_empty() {
         String::new()
     } else {
-        format!(" ({})", overlay.model_name)
+        format!(" ({})", overlay.model_label())
     };
     let title = match overlay.state {
         SummaryState::Loading if overlay.reasoning.is_empty() => format!(

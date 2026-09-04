@@ -731,6 +731,7 @@ async fn dismissing_summary_cancels_stream_and_rejects_queued_chunks() {
     stream_tx
         .send(Ok(SummaryEvent::Started {
             model: "fake/model".to_string(),
+            resolved_model: None,
         }))
         .expect("send started event");
     app.handle_app_event(rx.recv().await.expect("started event"));

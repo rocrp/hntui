@@ -23,6 +23,10 @@ pub(crate) trait LlmStream: Send + Sync {
 
 pub(crate) struct LlmSession {
     model: String,
+    /// What the server said is answering, when it said anything. Known by the
+    /// time the session exists: the library waits for the first chunk before
+    /// handing the stream over, and that frame names the model.
+    resolved_model: Option<String>,
     chunks: BoxStream<'static, LlmResult<SummaryChunk>>,
 }
 
@@ -31,7 +35,19 @@ impl LlmSession {
     pub(crate) fn for_test(model: &str, chunks: Vec<LlmResult<SummaryChunk>>) -> Self {
         Self {
             model: model.to_string(),
+            resolved_model: None,
             chunks: Box::pin(futures::stream::iter(chunks)),
+        }
+    }
+
+    pub(crate) fn for_test_resolving_to(
+        model: &str,
+        resolved_model: &str,
+        chunks: Vec<LlmResult<SummaryChunk>>,
+    ) -> Self {
+        Self {
+            resolved_model: Some(resolved_model.to_string()),
+            ..Self::for_test(model, chunks)
         }
     }
 }
@@ -68,8 +84,16 @@ pub struct SummaryInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SummaryEvent {
-    Started { model: String },
-    Chunk { content: String, reasoning: String },
+    Started {
+        model: String,
+        /// The ResolvedModel, when the backend reported one that differs from
+        /// what was asked for.
+        resolved_model: Option<String>,
+    },
+    Chunk {
+        content: String,
+        reasoning: String,
+    },
     Complete,
 }
 
@@ -154,6 +178,7 @@ impl Summarizer {
             };
             yield Ok(SummaryEvent::Started {
                 model: session.model,
+                resolved_model: session.resolved_model,
             });
 
             while let Some(chunk) = session.chunks.next().await {
@@ -200,6 +225,7 @@ impl LlmStream for SmolLlmStream {
 
             let stream = builder.await?;
             let model = stream.model().to_string();
+            let resolved_model = stream.resolved_model();
             let chunks = stream.map(|chunk| {
                 chunk.map(|chunk| SummaryChunk {
                     content: chunk.content,
@@ -208,6 +234,7 @@ impl LlmStream for SmolLlmStream {
             });
             Ok(LlmSession {
                 model,
+                resolved_model,
                 chunks: Box::pin(chunks),
             })
         })

@@ -12,6 +12,7 @@ impl LlmStream for FakeLlmStream {
         async move {
             Ok(LlmSession {
                 model: "fake/model".to_string(),
+                resolved_model: None,
                 chunks: Box::pin(stream::iter(vec![
                     Ok(SummaryChunk {
                         content: String::new(),
@@ -42,6 +43,7 @@ impl LlmStream for FailingLlmStream {
             }
             Ok(LlmSession {
                 model: "fake/model".to_string(),
+                resolved_model: None,
                 chunks: Box::pin(stream::iter(vec![
                     Ok(SummaryChunk {
                         content: "partial".to_string(),
@@ -226,7 +228,8 @@ async fn fake_stream_emits_started_chunks_and_complete_in_order() {
         events,
         vec![
             SummaryEvent::Started {
-                model: "fake/model".to_string()
+                model: "fake/model".to_string(),
+                resolved_model: None,
             },
             SummaryEvent::Chunk {
                 content: String::new(),
@@ -278,7 +281,8 @@ async fn mid_stream_error_preserves_prior_chunks_without_complete() {
             .expect("started event")
             .expect("started"),
         SummaryEvent::Started {
-            model: "fake/model".to_string()
+            model: "fake/model".to_string(),
+            resolved_model: None,
         }
     );
     assert_eq!(
@@ -295,4 +299,49 @@ async fn mid_stream_error_preserves_prior_chunks_without_complete() {
         .expect_err("stream should fail");
     assert_eq!(error.to_string(), "stream failed");
     assert!(events.next().await.is_none());
+}
+
+/// A backend that answers with a model other than the one asked for, the way a
+/// proxy resolving an alias does.
+#[derive(Clone)]
+struct ResolvingLlmStream;
+
+impl LlmStream for ResolvingLlmStream {
+    fn start(&self, _request: SummaryRequest) -> LlmFuture {
+        async move {
+            Ok(LlmSession::for_test_resolving_to(
+                "smolserver/summary",
+                "gpt-5!high",
+                vec![Ok(SummaryChunk {
+                    content: "answer".to_string(),
+                    reasoning: String::new(),
+                })],
+            ))
+        }
+        .boxed()
+    }
+}
+
+#[tokio::test]
+async fn the_started_event_carries_the_model_the_server_reported() {
+    let summarizer = Summarizer::with_stream(
+        Some(config()),
+        Some("test-key".to_string()),
+        Arc::new(ResolvingLlmStream),
+    );
+
+    let first = summarizer
+        .summarize(input())
+        .next()
+        .await
+        .expect("started event")
+        .expect("started");
+
+    assert_eq!(
+        first,
+        SummaryEvent::Started {
+            model: "smolserver/summary".to_string(),
+            resolved_model: Some("gpt-5!high".to_string()),
+        }
+    );
 }

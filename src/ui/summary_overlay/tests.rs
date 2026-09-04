@@ -23,6 +23,7 @@ fn reducer_accumulates_reasoning_then_content_without_mixing_them() {
 
     overlay.handle_event(SummaryEvent::Started {
         model: "fake/model".to_string(),
+        resolved_model: None,
     });
     overlay.handle_event(SummaryEvent::Chunk {
         content: String::new(),
@@ -50,6 +51,7 @@ fn clipboard_text_contains_story_metadata_and_raw_markdown() {
     overlay.begin(&story(), 2);
     overlay.handle_event(SummaryEvent::Started {
         model: "fake/model".to_string(),
+        resolved_model: None,
     });
     overlay.handle_event(SummaryEvent::Chunk {
         content: "# Summary".to_string(),
@@ -179,4 +181,70 @@ fn first_summary_content_resets_to_top_then_streaming_growth_holds_position() {
     assert_eq!(overlay.scroll_offset(), 2);
     overlay.scroll_down(usize::MAX);
     assert!(overlay.scroll_offset() > 2);
+}
+
+// --- #30: ResolvedModel -----------------------------------------------------
+
+fn started(model: &str, resolved: Option<&str>) -> SummaryEvent {
+    SummaryEvent::Started {
+        model: model.to_string(),
+        resolved_model: resolved.map(str::to_string),
+    }
+}
+
+#[test]
+fn the_title_names_both_models_when_a_proxy_resolved_the_request() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+
+    overlay.handle_event(started("smolserver/summary", Some("gpt-5!high")));
+
+    assert_eq!(overlay.model_label(), "smolserver/summary → gpt-5!high");
+}
+
+#[test]
+fn the_title_names_one_model_when_nothing_resolved_it() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+
+    overlay.handle_event(started("gemini/flash", None));
+    assert_eq!(overlay.model_label(), "gemini/flash");
+
+    // A server that echoes the request back is not telling us anything new.
+    overlay.handle_event(started("gemini/flash", Some("gemini/flash")));
+    assert_eq!(overlay.model_label(), "gemini/flash");
+}
+
+#[test]
+fn a_new_summary_forgets_the_previous_resolved_model() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    overlay.handle_event(started("smolserver/summary", Some("gpt-5!high")));
+
+    overlay.begin(&story(), 3);
+
+    assert_eq!(overlay.model_label(), "");
+}
+
+#[test]
+fn copied_front_matter_carries_the_resolved_model_only_when_it_differs() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    overlay.handle_event(started("smolserver/summary", Some("gpt-5!high")));
+    overlay.handle_event(SummaryEvent::Chunk {
+        content: "summary".to_string(),
+        reasoning: String::new(),
+    });
+    overlay.handle_event(SummaryEvent::Complete);
+
+    let copied = overlay.copy_text();
+    assert!(copied.contains("model: smolserver/summary\n"), "{copied}");
+    assert!(copied.contains("resolved_model: gpt-5!high\n"), "{copied}");
+
+    overlay.begin(&story(), 3);
+    overlay.handle_event(started("gemini/flash", None));
+    overlay.handle_event(SummaryEvent::Complete);
+    let copied = overlay.copy_text();
+    assert!(copied.contains("model: gemini/flash\n"), "{copied}");
+    assert!(!copied.contains("resolved_model:"), "{copied}");
 }

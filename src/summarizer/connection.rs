@@ -16,7 +16,21 @@ pub(crate) struct ConnectionDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConnectionTestSuccess {
     pub(crate) model: String,
+    /// The ResolvedModel, when the server named one that differs from the
+    /// requested spec.
+    pub(crate) resolved_model: Option<String>,
     pub(crate) ttft: Duration,
+}
+
+impl ConnectionTestSuccess {
+    /// How the served model reads: `requested → resolved` behind an alias or
+    /// proxy, the requested spec alone otherwise.
+    pub(crate) fn model_label(&self) -> String {
+        match &self.resolved_model {
+            Some(resolved) => format!("{} → {resolved}", self.model),
+            None => self.model.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -58,13 +72,17 @@ impl Summarizer {
                     api_key: draft.api_key,
                     base_url: draft.base_url,
                 };
-                let LlmSession { model, mut chunks } =
-                    llm.start(request).await.map_err(ConnectionTestError::Llm)?;
+                let LlmSession {
+                    model,
+                    resolved_model,
+                    mut chunks,
+                } = llm.start(request).await.map_err(ConnectionTestError::Llm)?;
 
                 while let Some(chunk) = chunks.next().await {
                     let chunk = chunk.map_err(ConnectionTestError::Llm)?;
                     if !chunk.content.is_empty() {
                         return Ok(ConnectionTestSuccess {
+                            resolved_model: resolved_model.filter(|resolved| *resolved != model),
                             model,
                             ttft: started.elapsed(),
                         });

@@ -38,7 +38,7 @@ impl App {
         }
         self.set_connection_test_state(match result {
             Ok(success) => ConnectionTestState::Success {
-                model: success.model.clone(),
+                model: success.model_label(),
                 ttft: success.ttft,
             },
             Err(error) => ConnectionTestState::Error(error.friendly_message()),

@@ -44,6 +44,7 @@ impl LlmStream for ReasoningOnlyStream {
             };
             Ok(LlmSession {
                 model: "fake/model".to_string(),
+                resolved_model: None,
                 chunks: Box::pin(chunks),
             })
         }
@@ -75,6 +76,7 @@ impl LlmStream for CapturingStream {
             };
             Ok(LlmSession {
                 model: "fallback/served-model".to_string(),
+                resolved_model: None,
                 chunks: Box::pin(chunks),
             })
         }
