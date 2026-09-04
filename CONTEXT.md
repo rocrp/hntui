@@ -50,9 +50,21 @@ _Avoid_: version, epoch
 The exact URL the Summarizer's request will be sent to, derived from the Model's provider prefix and the Base URL.
 _Avoid_: final URL, parsed URL
 
+**ResolvedModel**:
+The model identity the server reports as having produced a response; differs from the requested Model behind aliases and proxies, absent when the backend does not report one.
+_Avoid_: actual model, real model
+
 **ConnectionTest**:
-The settings action that verifies the draft LLM configuration by sending a minimal real request along the Summarizer's exact path.
+The action that verifies the LLM configuration just reloaded by sending a minimal real request along the Summarizer's exact path.
 _Avoid_: ping, health check (it verifies the full chain, not host liveness)
+
+**Editor**:
+The external `$VISUAL`/`$EDITOR` program the app hands the terminal to for editing the config file.
+_Avoid_: settings popup, form
+
+**ConfigReload**:
+Re-reading the config file after the Editor returns and applying it to the running app; a file that fails to parse or validate leaves the previous config in force.
+_Avoid_: restart, refresh
 
 ### Modules
 

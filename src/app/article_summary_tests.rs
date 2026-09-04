@@ -3,7 +3,7 @@ use super::tests::{cli, comment, story, test_article_fetcher};
 use super::*;
 use crate::api::{InMemorySource, Sources};
 use crate::config::{Config, SummarizeConfig};
-use crate::input::{Action, SettingsAction, SummaryAction, TextAction};
+use crate::input::{Action, SummaryAction};
 use crate::summarizer::{
     LlmFuture, LlmSession, LlmStream, Summarizer, SummaryChunk, SummaryRequest,
 };
@@ -171,16 +171,21 @@ async fn toggling_the_article_off_summarizes_immediately_without_a_fetch() {
 }
 
 #[tokio::test]
-async fn settings_toggle_off_preserves_the_pre_article_prompt_bytes() {
+async fn a_config_reload_that_turns_the_article_off_takes_effect_on_the_next_summary() {
     let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("config.toml");
     let item = linked_story(1);
     let source =
         Arc::new(InMemorySource::new(vec![item.clone()]).with_comments(1, vec![comment(11)]));
     let sources = Sources::new(source.clone(), source);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let summarize = summarize_config(true);
-    let config =
-        Config::for_test_with_summarize(directory.path().join("config.toml"), summarize.clone());
+    std::fs::write(
+        &path,
+        "[summarize]\nmodel = \"test/model\"\ninclude_article = true\n",
+    )
+    .expect("write config");
+    let config = Config::for_test_with_summarize(path.clone(), summarize.clone());
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let summarizer = Summarizer::with_stream(
         Some(summarize),
@@ -200,26 +205,12 @@ async fn settings_toggle_off_preserves_the_pre_article_prompt_bytes() {
     );
     app.restore_story_list_state(vec![item.id], vec![item.clone()], None);
 
-    app.handle_action(Action::OpenSettings);
-    for _ in 0..4 {
-        app.handle_action(Action::Settings(SettingsAction::MoveDown));
-    }
-    app.handle_action(Action::Settings(SettingsAction::Activate));
-    app.handle_action(Action::Settings(SettingsAction::Edit(
-        TextAction::DeleteToStart,
-    )));
-    for character in "false".chars() {
-        app.handle_action(Action::Settings(SettingsAction::Edit(TextAction::Insert(
-            character,
-        ))));
-    }
-    app.handle_action(Action::Settings(SettingsAction::Edit(TextAction::Submit)));
-    let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-        .await
-        .expect("settings save timed out")
-        .expect("app event channel closed");
-    app.handle_app_event(event);
-    app.handle_action(Action::Settings(SettingsAction::CloseAndSave));
+    std::fs::write(
+        &path,
+        "[summarize]\nmodel = \"test/model\"\ninclude_article = false\n",
+    )
+    .expect("edit config");
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
 
     assert!(
         !app.config
@@ -233,9 +224,12 @@ async fn settings_toggle_off_preserves_the_pre_article_prompt_bytes() {
     finish_summary(&mut app, &mut rx).await;
 
     assert_eq!(app.summary_overlay.state(), SummaryState::Done);
+    // The reload also fires a ConnectionTest, whose one-word probe reaches the
+    // same recorder; the summarize prompt is the one that must carry no article.
+    let recorded = prompts.lock().expect("prompt recorder poisoned");
     assert_eq!(
-        prompts.lock().expect("prompt recorder poisoned").as_slice(),
-        ["# story 1\n\nbob: hello\n\n"]
+        recorded.last().map(String::as_str),
+        Some("# story 1\n\nbob: hello\n\n")
     );
 }
 

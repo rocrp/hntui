@@ -17,15 +17,9 @@ pub struct Tui {
 
 impl Tui {
     pub fn init() -> Result<Self> {
-        enable_raw_mode().context("enable raw mode")?;
+        claim_terminal()?;
 
-        let mut out = stdout();
-        out.execute(EnterAlternateScreen)
-            .context("enter alternate screen")?;
-        out.execute(EnableMouseCapture)
-            .context("enable mouse capture")?;
-
-        let backend = CrosstermBackend::new(out);
+        let backend = CrosstermBackend::new(stdout());
         let mut terminal = Terminal::new(backend).context("create terminal")?;
         terminal.clear().context("clear terminal")?;
 
@@ -42,6 +36,25 @@ impl Tui {
         Ok(())
     }
 
+    /// Hands the terminal back to the shell so an external program can own it.
+    ///
+    /// The caller must also drop the crossterm event stream first: its reader
+    /// thread sits in a blocking read on the tty and would swallow keystrokes
+    /// meant for the editor.
+    pub fn suspend(&mut self) -> Result<()> {
+        restore_terminal()
+    }
+
+    /// Takes the terminal back after an external program returns, redrawing
+    /// from scratch since the screen and its size may both have changed.
+    pub fn resume(&mut self) -> Result<()> {
+        claim_terminal()?;
+        self.terminal
+            .clear()
+            .context("clear terminal after resume")?;
+        Ok(())
+    }
+
     pub fn area(&self) -> Result<ratatui::layout::Rect> {
         let size = self.terminal.size().context("read terminal size")?;
         Ok(ratatui::layout::Rect::new(0, 0, size.width, size.height))
@@ -52,6 +65,17 @@ impl Drop for Tui {
     fn drop(&mut self) {
         let _ = restore_terminal();
     }
+}
+
+fn claim_terminal() -> Result<()> {
+    enable_raw_mode().context("enable raw mode")?;
+
+    let mut out = stdout();
+    out.execute(EnterAlternateScreen)
+        .context("enter alternate screen")?;
+    out.execute(EnableMouseCapture)
+        .context("enable mouse capture")?;
+    Ok(())
 }
 
 fn restore_terminal() -> Result<()> {

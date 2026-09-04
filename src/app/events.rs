@@ -70,20 +70,6 @@ impl App {
                 assert_eq!(task.target(), TaskTarget::Summary);
                 self.summary_overlay.handle_event(event);
             }
-            AppEvent::SettingsSaved { task, config } => {
-                if !self.tasks.finish(task) {
-                    return;
-                }
-                assert_eq!(task.target(), TaskTarget::SettingsSave);
-                self.summarizer
-                    .update_config(config.summarize().cloned(), config.api_key_override());
-                self.config = config;
-                if let Some(popup) = self.settings_popup.as_mut() {
-                    popup.mark_saved();
-                    popup.api_key_status = self.config.effective_api_key().status();
-                }
-                self.last_error = None;
-            }
             AppEvent::ConnectionTestFinished { task, result } => {
                 self.handle_connection_test_finished(task, result);
             }
@@ -219,9 +205,6 @@ impl App {
             TaskTarget::Summary => self.summary_overlay.fail(message),
             TaskTarget::ConnectionTest => {
                 unreachable!("ConnectionTest reports typed result events: {message}")
-            }
-            TaskTarget::SettingsSave => {
-                self.last_error = Some(format!("settings: {message}"));
             }
             TaskTarget::StoryStateSave => {
                 logging::log_error(format!("failed to save story state: {message}"));

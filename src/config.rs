@@ -2,6 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// The commented starter config. Editing a blank file teaches nobody what the
+/// keys are, so a missing config is seeded with this before the Editor opens.
+const TEMPLATE: &str = include_str!("../config.toml");
+
 #[derive(Debug, Clone)]
 pub struct Config {
     stored: StoredConfig,
@@ -12,6 +16,26 @@ pub struct Config {
 struct StoredConfig {
     summarize: Option<SummarizeConfig>,
     article: Option<ArticleConfig>,
+}
+
+impl StoredConfig {
+    /// Rejects values that parse as TOML but cannot work: an empty model, or a
+    /// limit of zero. Serde already covers the type errors.
+    fn validate(&self) -> Result<()> {
+        let Some(summarize) = &self.summarize else {
+            return Ok(());
+        };
+        if summarize.model.trim().is_empty() {
+            anyhow::bail!("summarize.model must not be empty");
+        }
+        if summarize.max_comments == 0 {
+            anyhow::bail!("summarize.max_comments must be greater than 0");
+        }
+        if summarize.max_article_chars == 0 {
+            anyhow::bail!("summarize.max_article_chars must be greater than 0");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -38,10 +62,6 @@ pub struct SummarizeConfig {
     pub max_article_chars: usize,
     #[serde(default = "default_system_prompt")]
     pub system_prompt: String,
-}
-
-pub struct ConfigEdits {
-    pub summarize: SummarizeConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +126,12 @@ impl Config {
         }
     }
 
+    /// Loads one exact path, as `--config` does.
+    #[cfg(test)]
+    pub(crate) fn load_from_for_test(path: PathBuf) -> Result<Self> {
+        Self::load_from(vec![path.clone()], path)
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test_with_summarize(path: PathBuf, summarize: SummarizeConfig) -> Self {
         Self {
@@ -131,19 +157,40 @@ impl Config {
             .find(|candidate| candidate.exists())
             .cloned()
             .unwrap_or(default_path);
-        let stored = if path.exists() {
+        let stored: StoredConfig = if path.exists() {
             let contents = std::fs::read_to_string(&path)
                 .with_context(|| format!("read config {}", path.display()))?;
             toml::from_str(&contents).with_context(|| format!("parse config {}", path.display()))?
         } else {
             StoredConfig::default()
         };
+        stored.validate()?;
         Ok(Self { stored, path })
     }
 
-    #[cfg(test)]
-    fn path(&self) -> &Path {
+    /// The file this config was read from — the one the Editor opens.
+    pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Creates the config file from the template when it does not exist yet, so
+    /// the Editor always opens something worth reading.
+    pub fn ensure_file_exists(&self) -> Result<()> {
+        if self.path.exists() {
+            return Ok(());
+        }
+        if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create config dir {}", parent.display()))?;
+        }
+        std::fs::write(&self.path, TEMPLATE)
+            .with_context(|| format!("write starter config {}", self.path.display()))
+    }
+
+    /// Re-reads this config's file. The caller keeps the current config when
+    /// this fails, so a typo in the file never takes the app down with it.
+    pub fn reload(&self) -> Result<Self> {
+        Self::load_from(vec![self.path.clone()], self.path.clone())
     }
 
     pub fn summarize(&self) -> Option<&SummarizeConfig> {
@@ -210,48 +257,6 @@ impl Config {
         )
         .then_some(effective.value)
         .flatten()
-    }
-
-    pub async fn save(&self, edits: ConfigEdits) -> Result<Self> {
-        let next = Self {
-            stored: StoredConfig {
-                summarize: Some(edits.summarize),
-                // The settings popup never edits [article]; carry it through
-                // so saving from the popup does not drop it.
-                article: self.stored.article.clone(),
-            },
-            path: self.path.clone(),
-        };
-        let contents = toml::to_string_pretty(&next.stored).context("serialize config")?;
-        if let Some(parent) = next
-            .path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("create config dir {}", parent.display()))?;
-        }
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .context("system time")?
-            .as_nanos();
-        let temporary = next
-            .path
-            .with_extension(format!("toml.tmp.{}.{unique}", std::process::id()));
-        tokio::fs::write(&temporary, contents)
-            .await
-            .with_context(|| format!("write temp config {}", temporary.display()))?;
-        tokio::fs::rename(&temporary, &next.path)
-            .await
-            .with_context(|| {
-                format!(
-                    "rename config {} -> {}",
-                    temporary.display(),
-                    next.path.display()
-                )
-            })?;
-        Ok(next)
     }
 }
 
@@ -391,40 +396,79 @@ mod tests {
             .is_some_and(|name| name == "plugin-config.toml")));
     }
 
-    #[tokio::test]
-    async fn save_round_trips_to_the_loaded_file() {
+    #[test]
+    fn a_missing_config_is_seeded_from_the_commented_template() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let preferred = dir.path().join("config.toml");
-        let legacy = dir.path().join("plugin-config.toml");
-        let canonical = dir.path().join("canonical/config.toml");
-        std::fs::write(&legacy, "[summarize]\nmodel = \"openai/old\"\n")
-            .expect("write legacy config");
-        let config = Config::load_from(vec![preferred.clone(), legacy.clone()], canonical.clone())
-            .expect("load legacy config");
+        let path = dir.path().join("nested/config.toml");
+        let config = Config::load_from(vec![path.clone()], path.clone()).expect("load empty");
 
-        let saved = config
-            .save(ConfigEdits {
-                summarize: SummarizeConfig {
-                    model: "openai/new".to_string(),
-                    api_key: None,
-                    base_url: None,
-                    max_comments: 50,
-                    include_article: true,
-                    max_article_chars: 20_000,
-                    system_prompt: "Be terse".to_string(),
-                },
-            })
-            .await
-            .expect("save config");
-        let reloaded =
-            Config::load_from(vec![preferred, legacy.clone()], canonical).expect("reload config");
+        config.ensure_file_exists().expect("seed config");
 
-        assert_eq!(saved.path(), legacy);
-        assert_eq!(
-            reloaded.summarize().expect("summarize config").model,
-            "openai/new"
+        let seeded = std::fs::read_to_string(&path).expect("template written");
+        assert!(
+            seeded.contains("[summarize]"),
+            "a starter file, not a blank one"
         );
-        assert!(!reloaded.path().ends_with("canonical/config.toml"));
+        assert!(
+            seeded.contains('#'),
+            "the template's comments are the documentation"
+        );
+
+        std::fs::write(&path, "[summarize]\nmodel = \"edited\"\n").expect("edit");
+        config.ensure_file_exists().expect("second call");
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("still there")
+                .contains("edited"),
+            "an existing config is never overwritten"
+        );
+    }
+
+    #[test]
+    fn reload_re_reads_the_file_the_config_came_from() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[summarize]\nmodel = \"openai/old\"\n").expect("write");
+        let config = Config::load_from(vec![path.clone()], path.clone()).expect("load");
+
+        std::fs::write(&path, "[summarize]\nmodel = \"openai/new\"\n").expect("rewrite");
+        let reloaded = config.reload().expect("reload");
+
+        assert_eq!(reloaded.summarize().expect("summarize").model, "openai/new");
+        assert_eq!(reloaded.path(), path);
+    }
+
+    #[test]
+    fn values_that_parse_but_cannot_work_are_rejected() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        for (name, body, expected) in [
+            (
+                "empty-model",
+                "[summarize]\nmodel = \"\"\n",
+                "model must not be empty",
+            ),
+            (
+                "zero-comments",
+                "[summarize]\nmodel = \"x/y\"\nmax_comments = 0\n",
+                "max_comments must be greater than 0",
+            ),
+            (
+                "zero-chars",
+                "[summarize]\nmodel = \"x/y\"\nmax_article_chars = 0\n",
+                "max_article_chars must be greater than 0",
+            ),
+        ] {
+            let path = dir.path().join(format!("{name}.toml"));
+            std::fs::write(&path, body).expect("write config");
+
+            let error = Config::load_from(vec![path.clone()], path)
+                .expect_err("a config that cannot work must not load");
+
+            assert!(
+                format!("{error:#}").contains(expected),
+                "for {name}: {error:#}"
+            );
+        }
     }
 
     #[test]
@@ -495,65 +539,5 @@ mod tests {
 
         assert_eq!(bare.article_bin(), "localwebrs");
         assert_eq!(overridden.article_bin(), "/opt/bin/localwebrs");
-    }
-
-    #[tokio::test]
-    async fn saving_settings_keeps_the_article_section() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "[summarize]\nmodel = \"openai/old\"\n\n[article]\nbin = \"/opt/bin/localwebrs\"\n",
-        )
-        .expect("write config");
-        let config = Config::load_from(vec![path.clone()], path.clone()).expect("load config");
-
-        let saved = config
-            .save(ConfigEdits {
-                summarize: SummarizeConfig {
-                    model: "openai/new".to_string(),
-                    api_key: None,
-                    base_url: None,
-                    max_comments: 50,
-                    include_article: true,
-                    max_article_chars: 20_000,
-                    system_prompt: "Be terse".to_string(),
-                },
-            })
-            .await
-            .expect("save config");
-        let reloaded = Config::load_from(vec![path.clone()], path).expect("reload config");
-
-        assert_eq!(saved.article_bin(), "/opt/bin/localwebrs");
-        assert_eq!(reloaded.article_bin(), "/opt/bin/localwebrs");
-        assert_eq!(
-            reloaded.summarize().expect("summarize config").model,
-            "openai/new"
-        );
-    }
-
-    #[tokio::test]
-    async fn save_without_an_existing_file_uses_the_canonical_path() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let canonical = dir.path().join("hntui/config.toml");
-        let config = Config::load_from(vec![dir.path().join("missing.toml")], canonical.clone())
-            .expect("load empty config");
-
-        config
-            .save(ConfigEdits {
-                summarize: SummarizeConfig {
-                    model: "gemini/test".to_string(),
-                    api_key: None,
-                    base_url: None,
-                    max_comments: 200,
-                    include_article: true,
-                    max_article_chars: 20_000,
-                    system_prompt: "Summarize".to_string(),
-                },
-            })
-            .await
-            .expect("save canonical config");
-
-        assert!(canonical.exists());
     }
 }

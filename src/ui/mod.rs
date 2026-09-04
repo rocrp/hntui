@@ -6,7 +6,6 @@ pub mod feed_filter;
 pub mod help;
 pub mod markdown;
 pub(crate) mod overlay;
-pub mod settings;
 pub mod story_list;
 pub mod summary_overlay;
 pub mod theme;
@@ -46,12 +45,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let layer = app.input_layer();
     let has_overlay = matches!(
         layer,
-        InputLayer::Help
-            | InputLayer::Summary
-            | InputLayer::Article
-            | InputLayer::FeedFilter
-            | InputLayer::Settings
-            | InputLayer::SettingsEditor
+        InputLayer::Help | InputLayer::Summary | InputLayer::Article | InputLayer::FeedFilter
     );
     if has_overlay {
         frame.render_widget(Dim, frame.area());
@@ -66,8 +60,48 @@ pub fn render(frame: &mut Frame, app: &App) {
             article_overlay::render(frame, &app.article_overlay, app.spinner_frame());
         }
         InputLayer::FeedFilter => feed_filter::render(frame, app),
-        InputLayer::Settings | InputLayer::SettingsEditor => settings::render(frame, app),
         InputLayer::FilterText | InputLayer::SearchText | InputLayer::View => {}
+    }
+}
+
+/// The status line for the last ConfigReload, including how its ConnectionTest
+/// is going. Rendered in place of the usual footer until the user moves on.
+pub(crate) fn config_status_line(
+    status: &crate::app::ConfigStatus,
+) -> ratatui::text::Line<'static> {
+    use crate::app::ConnectionTestState;
+    use ratatui::text::{Line, Span};
+
+    let head = Span::styled(
+        status.message.clone(),
+        if status.failed {
+            theme::ERROR
+        } else {
+            theme::HINT
+        },
+    );
+    let tail = match &status.test {
+        ConnectionTestState::Idle => None,
+        ConnectionTestState::Testing => Some(Span::styled(" · testing…", theme::HINT)),
+        ConnectionTestState::Success { model, ttft } => Some(Span::styled(
+            format!(" · ok {model} · {}", format_ttft(*ttft)),
+            theme::SUCCESS,
+        )),
+        ConnectionTestState::Error(message) => {
+            Some(Span::styled(format!(" · {message}"), theme::ERROR))
+        }
+    };
+    match tail {
+        Some(tail) => Line::from(vec![head, tail]),
+        None => Line::from(head),
+    }
+}
+
+pub(crate) fn format_ttft(ttft: std::time::Duration) -> String {
+    if ttft < std::time::Duration::from_secs(1) {
+        format!("{}ms", ttft.as_millis())
+    } else {
+        format!("{:.1}s", ttft.as_secs_f64())
     }
 }
 

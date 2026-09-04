@@ -23,17 +23,17 @@ mod article_tests;
 mod articles;
 mod comment_tree;
 mod comments;
+mod config_edit;
+mod connection_test;
 mod events;
 #[cfg(test)]
 mod help_tests;
 mod list_nav;
 mod mouse;
+mod popup_actions;
 mod prefetch;
 mod run;
 mod search;
-mod settings_actions;
-mod settings_connection;
-mod settings_popup;
 mod stories;
 #[cfg(test)]
 mod summary_error_tests;
@@ -43,11 +43,10 @@ mod test_support;
 mod tests;
 
 use self::articles::ArticleStore;
+pub(crate) use self::config_edit::{ConfigStatus, ConnectionTestState};
 use self::prefetch::PrefetchCache;
 pub use self::run::run;
 use self::search::SavedStories;
-pub use self::settings_popup::SettingsPopup;
-pub(crate) use self::settings_popup::{ConnectionTestState, SettingsRow};
 use crate::tasks::TaskLifecycle;
 pub(crate) use crate::tasks::{TaskId, TaskTarget};
 use crate::ui::article_overlay::ArticleOverlay;
@@ -93,10 +92,6 @@ pub enum AppEvent {
     Summary {
         task: TaskId,
         event: SummaryEvent,
-    },
-    SettingsSaved {
-        task: TaskId,
-        config: Config,
     },
     ConnectionTestFinished {
         task: TaskId,
@@ -197,7 +192,12 @@ pub struct App {
 
     pub current_feed: FeedKind,
     pub feed_filter_popup: Option<FeedFilterPopup>,
-    pub settings_popup: Option<SettingsPopup>,
+    /// Set when the user asked to edit the config; the run loop owns the
+    /// terminal, so it performs the handoff and reports back.
+    editor_requested: bool,
+    /// What the last ConfigReload did, shown in the status line until the user
+    /// moves on.
+    pub config_status: Option<ConfigStatus>,
     config: Config,
     pub keyword_filter: String,
     pub visible_story_indices: Vec<usize>,
@@ -274,7 +274,8 @@ impl App {
             article_overlay: ArticleOverlay::default(),
             current_feed: FeedKind::default(),
             feed_filter_popup: None,
-            settings_popup: None,
+            editor_requested: false,
+            config_status: None,
             config,
             keyword_filter: String::new(),
             visible_story_indices: vec![],
@@ -330,7 +331,6 @@ impl App {
                         | TaskTarget::Article(_)
                         | TaskTarget::Summary
                         | TaskTarget::ConnectionTest
-                        | TaskTarget::SettingsSave
                 )
             }) > 0
             || matches!(

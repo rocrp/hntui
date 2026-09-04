@@ -3,6 +3,7 @@ mod app;
 mod article;
 mod browser;
 mod config;
+mod editor;
 mod input;
 mod logging;
 mod state;

@@ -106,6 +106,16 @@ impl ArticleFetcher {
         }
     }
 
+    /// The same fetcher pointed at a different binary, for a ConfigReload that
+    /// changed `[article].bin`.
+    pub fn with_bin(&self, bin: String) -> Self {
+        Self {
+            bin,
+            working_dir: self.working_dir.clone(),
+            timeout: self.timeout,
+        }
+    }
+
     #[cfg(test)]
     fn with_timeout(bin: String, timeout: Duration) -> Self {
         Self {

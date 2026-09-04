@@ -16,7 +16,6 @@ pub(crate) enum TaskTarget {
     Article(u64),
     Summary,
     ConnectionTest,
-    SettingsSave,
     StoryStateSave,
 }
 
@@ -314,7 +313,7 @@ mod tests {
     async fn failures_use_the_single_failure_event() {
         let (mut lifecycle, mut rx) = lifecycle();
         let task = lifecycle.spawn(
-            TaskTarget::SettingsSave,
+            TaskTarget::StoryStateSave,
             async { Err::<(), _>(anyhow::anyhow!("save failed")) },
             |_task, ()| Event::Completed,
         );

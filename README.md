@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `s` | Summarize (requires LLM key) |
 | `v` | View article (requires localwebrs) |
 | `r` | Refresh |
-| `,` | Settings |
+| `,` | Edit config (`$EDITOR`) |
 | `?` | Help |
 | `q`, `Esc` | Quit |
 
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `s` | Summarize (requires LLM key) |
 | `v` | View article (requires localwebrs) |
 | `r` | Refresh |
-| `,` | Settings |
+| `,` | Edit config (`$EDITOR`) |
 | `q`, `Esc` | Back |
 
 **Article** (`v`)
@@ -95,14 +95,20 @@ The UI uses a fixed Catppuccin Frappé theme.
 
 Explicit config path: `hntui --config PATH`
 
+### Editing the config
+
+Press `,` to open the config in your editor (`$VISUAL`, then `$EDITOR`, then
+`vi`). hntui hands over the terminal, and re-reads the file when the editor
+exits — no restart. The first time, the file is created from a commented
+template, so there is something to read.
+
+A file that fails to parse, or that sets an empty model or a limit of zero,
+leaves the running configuration in force and reports the problem in the status
+line. Quitting the editor non-zero (vim's `:cq`) discards the edit entirely.
+
 ### AI summarization (`config.toml`)
 
 Press `s` on any story to summarize its discussion. Requires an LLM API key.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/config.toml \
-  -o ~/.config/hntui/config.toml
-```
 
 ```bash
 export HNTUI_LLM_API_KEY="your-key-here"
@@ -121,7 +127,9 @@ for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See
 Optional `base_url` overrides the provider's default endpoint. With `base_url`
 set, a bare model name without the `provider/` prefix is also accepted (e.g.
 `model = "qwen3"`); the key must then come from `HNTUI_LLM_API_KEY` or
-`api_key`, and the one `base_url` applies to every leg of a fallback list.
+`api_key`, and the one `base_url` applies to every leg of a fallback list. A leg
+may carry a `!effort` suffix (`openai/gpt-5!high`) that sets its reasoning
+effort.
 
 #### Base URL grammar
 
@@ -135,9 +143,8 @@ For standard and custom OpenAI-compatible routes, `base_url` resolves as follows
 | Otherwise: append `/v1/chat/completions` | `https://gateway.example/openai` | `https://gateway.example/openai/v1/chat/completions` |
 
 Built-in Anthropic and Gemini providers retain their provider-specific path
-injection. While editing Model or Base URL, check the live ResolvedEndpoint
-preview for the exact POST URL, then select `[ Test connection ]` to verify the
-draft configuration.
+injection. After each edit, the status line reports the exact POST URL the
+configuration resolves to.
 
 `hntui` auto-loads `~/.env.smolllm` if it exists (process env always wins).
 Pass `--env-file <path>` to load a different file explicitly.

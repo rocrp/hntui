@@ -106,8 +106,6 @@ pub(crate) const HINT: Style = Style::new().fg(SUBTEXT0);
 pub(crate) const KEY: Style = Style::new().fg(TEXT).add_modifier(Modifier::BOLD);
 /// Low-emphasis label
 pub(crate) const LABEL: Style = Style::new().fg(SUBTEXT1);
-/// Normal-emphasis value
-pub(crate) const VALUE: Style = Style::new().fg(TEXT);
 /// Purple accent (active section, cursor in popup)
 pub(crate) const ACCENT: Style = Style::new().fg(MAUVE).add_modifier(Modifier::BOLD);
 /// Green success flash ("Copied!", "Saved!")
@@ -134,8 +132,6 @@ pub(crate) const ARTICLE_LINK_SELECTED: Style = Style::new()
     .bg(BLUE)
     .add_modifier(Modifier::BOLD)
     .add_modifier(Modifier::UNDERLINED);
-/// Block cursor in editing mode
-pub(crate) const BLOCK_CURSOR: Style = Style::new().fg(SURFACE2).bg(GREEN);
 
 pub(crate) fn section_heading(active: bool) -> Style {
     if active {

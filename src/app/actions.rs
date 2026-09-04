@@ -1,5 +1,5 @@
 use super::list_nav::{move_selection_down, move_selection_up, page_down, page_up};
-use super::{App, FeedFilterPopup, SettingsPopup, TaskTarget, View};
+use super::{App, FeedFilterPopup, TaskTarget, View};
 use crate::api::FeedKind;
 use crate::input::{Action, HelpAction, InputLayer, SummaryAction};
 use anyhow::Context;
@@ -14,12 +14,6 @@ impl App {
             InputLayer::Summary
         } else if self.article_overlay.is_visible() {
             InputLayer::Article
-        } else if let Some(settings) = &self.settings_popup {
-            if settings.editing {
-                InputLayer::SettingsEditor
-            } else {
-                InputLayer::Settings
-            }
         } else if self.feed_filter_popup.is_some() {
             InputLayer::FeedFilter
         } else if self.filter_input_active {
@@ -33,6 +27,11 @@ impl App {
 
     pub fn handle_action(&mut self, action: Action) {
         self.last_user_activity = Instant::now();
+        if !matches!(action, Action::Noop) {
+            // The reload line has been on screen for at least a frame; the user
+            // moving on is the signal that they have read it.
+            self.config_status = None;
+        }
         match action {
             Action::Noop => return,
             Action::Help(action) => {
@@ -87,10 +86,6 @@ impl App {
             }
             Action::FeedFilter(action) => {
                 self.handle_feed_filter_action(action);
-                return;
-            }
-            Action::Settings(action) => {
-                self.handle_settings_action(action);
                 return;
             }
             Action::FilterInput(action) => {
@@ -287,9 +282,7 @@ impl App {
                 }
             }
 
-            (_, Action::OpenSettings) => {
-                self.settings_popup = Some(SettingsPopup::from_config(&self.config));
-            }
+            (_, Action::EditConfig) => self.request_editor(),
 
             (_, _) => {}
         }

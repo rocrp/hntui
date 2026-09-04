@@ -337,15 +337,14 @@ async fn expanding_a_comment_loads_children_from_the_in_memory_source() {
 }
 
 #[tokio::test]
-async fn settings_popup_open_edit_save_flows_only_through_actions() {
+async fn a_config_reload_adopts_the_edited_model_without_a_restart() {
     let directory = tempfile::tempdir().expect("temp dir");
     let path = directory.path().join("config.toml");
     let source = Arc::new(InMemorySource::default());
     let sources = Sources::new(source.clone(), source);
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, _rx) = mpsc::unbounded_channel();
     let config = Config::for_test(path.clone());
     let summarizer = Summarizer::new(None, None, reqwest::Client::new());
-    let article_fetcher = test_article_fetcher();
     let mut app = App::new(
         cli(),
         sources,
@@ -353,30 +352,130 @@ async fn settings_popup_open_edit_save_flows_only_through_actions() {
         None,
         config,
         summarizer,
-        article_fetcher,
+        test_article_fetcher(),
     );
 
-    app.handle_action(Action::OpenSettings);
-    app.handle_key(key(KeyCode::Enter));
-    for character in "openai/test".chars() {
-        app.handle_key(key(KeyCode::Char(character)));
-    }
-    app.handle_key(key(KeyCode::Enter));
-    let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
-        .await
-        .expect("settings save timed out")
-        .expect("settings event channel closed");
-    app.handle_app_event(event);
+    // Stand in for the editor session: the file changes while the app waits.
+    std::fs::write(&path, "[summarize]\nmodel = \"openai/test\"\n").expect("write config");
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
 
     assert_eq!(
         app.config
             .summarize()
-            .expect("saved summarize config")
+            .expect("reloaded summarize config")
             .model,
         "openai/test"
     );
-    assert!(path.exists());
-    assert!(!app.settings_popup.as_ref().expect("popup open").dirty);
+    let status = app.config_status.as_ref().expect("a reload reports itself");
+    assert!(!status.failed, "{}", status.message);
+    assert!(
+        status.message.contains("config reloaded"),
+        "{}",
+        status.message
+    );
+}
+
+#[tokio::test]
+async fn a_config_that_cannot_work_leaves_the_running_one_in_force() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("config.toml");
+    std::fs::write(&path, "[summarize]\nmodel = \"openai/good\"\n").expect("write config");
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let config = Config::load_from_for_test(path.clone()).expect("load config");
+    let summarizer = Summarizer::new(None, None, reqwest::Client::new());
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        config,
+        summarizer,
+        test_article_fetcher(),
+    );
+
+    for (broken, expected) in [
+        ("[summarize\nmodel = \"x\"\n", "parse config"),
+        (
+            "[summarize]\nmodel = \"x/y\"\nmax_comments = 0\n",
+            "max_comments",
+        ),
+    ] {
+        std::fs::write(&path, broken).expect("write broken config");
+        app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
+
+        let status = app
+            .config_status
+            .as_ref()
+            .expect("a failed reload reports itself");
+        assert!(status.failed, "{}", status.message);
+        assert!(status.message.contains(expected), "{}", status.message);
+        assert_eq!(
+            app.config.summarize().expect("summarize config").model,
+            "openai/good",
+            "the running config survives a broken edit"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_cancelled_editor_reloads_nothing() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("config.toml");
+    std::fs::write(&path, "[summarize]\nmodel = \"openai/good\"\n").expect("write config");
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        Config::load_from_for_test(path.clone()).expect("load config"),
+        Summarizer::new(None, None, reqwest::Client::new()),
+        test_article_fetcher(),
+    );
+
+    std::fs::write(&path, "[summarize]\nmodel = \"openai/discarded\"\n").expect("edit config");
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Cancelled { status: 1 }));
+
+    let status = app
+        .config_status
+        .as_ref()
+        .expect("a cancellation reports itself");
+    assert!(status.message.contains("status 1"), "{}", status.message);
+    assert!(
+        status.message.contains("not reloaded"),
+        "{}",
+        status.message
+    );
+    assert_eq!(
+        app.config.summarize().expect("summarize config").model,
+        "openai/good"
+    );
+}
+
+#[tokio::test]
+async fn the_editor_request_is_taken_once() {
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let directory = tempfile::tempdir().expect("temp dir");
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        Config::for_test(directory.path().join("config.toml")),
+        Summarizer::new(None, None, reqwest::Client::new()),
+        test_article_fetcher(),
+    );
+
+    assert!(!app.take_editor_request());
+    app.handle_action(Action::EditConfig);
+    assert!(app.take_editor_request(), "the run loop gets the request");
+    assert!(!app.take_editor_request(), "and only once");
 }
 
 #[tokio::test]

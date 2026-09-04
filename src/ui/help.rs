@@ -109,7 +109,7 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     lines.push(kv("f", "switch feed"));
     lines.push(kv("F", "filter by title"));
     lines.push(kv("r", "refresh"));
-    lines.push(kv(",", "settings"));
+    lines.push(kv(",", "edit config ($EDITOR)"));
     lines.push(kv("q / Esc", "quit"));
     lines.push(Line::raw(""));
 
@@ -127,7 +127,7 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     lines.push(kv("s", "summarize (AI)"));
     lines.push(kv("v", "view article"));
     lines.push(kv("r", "refresh"));
-    lines.push(kv(",", "settings"));
+    lines.push(kv(",", "edit config ($EDITOR)"));
     lines.push(kv("q / Esc", "back"));
     lines.push(Line::raw(""));
 

@@ -29,11 +29,6 @@ fn same_key_routes_by_the_single_active_layer() {
             Action::FeedFilter(FeedFilterAction::Dismiss),
         ),
         (
-            InputLayer::Settings,
-            key(KeyCode::Esc),
-            Action::Settings(SettingsAction::CloseAndSave),
-        ),
-        (
             InputLayer::FilterText,
             key(KeyCode::Esc),
             Action::FilterInput(TextAction::Cancel),
@@ -51,6 +46,22 @@ fn same_key_routes_by_the_single_active_layer() {
 }
 
 #[test]
+fn unicode_typing_reaches_a_text_input() {
+    assert_eq!(
+        KeyState::default().on_key(InputLayer::SearchText, key(KeyCode::Char('界'))),
+        Action::SearchInput(TextAction::Insert('界'))
+    );
+}
+
+#[test]
+fn comma_asks_for_the_editor() {
+    assert_eq!(
+        KeyState::default().on_key(InputLayer::View, key(KeyCode::Char(','))),
+        Action::EditConfig
+    );
+}
+
+#[test]
 fn question_mark_is_help_in_view_but_text_in_an_input() {
     let question = key(KeyCode::Char('?'));
 
@@ -61,22 +72,6 @@ fn question_mark_is_help_in_view_but_text_in_an_input() {
     assert_eq!(
         KeyState::default().on_key(InputLayer::SearchText, question),
         Action::SearchInput(TextAction::Insert('?'))
-    );
-}
-
-#[test]
-fn unicode_text_editing_is_an_action() {
-    assert_eq!(
-        KeyState::default().on_key(InputLayer::SettingsEditor, key(KeyCode::Char('界')),),
-        Action::Settings(SettingsAction::Edit(TextAction::Insert('界')))
-    );
-}
-
-#[test]
-fn enter_activates_the_selected_settings_row() {
-    assert_eq!(
-        KeyState::default().on_key(InputLayer::Settings, key(KeyCode::Enter)),
-        Action::Settings(SettingsAction::Activate)
     );
 }
 

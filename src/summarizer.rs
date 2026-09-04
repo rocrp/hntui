@@ -122,7 +122,7 @@ impl Summarizer {
         Box::pin(async_stream::stream! {
             let Some(config) = config else {
                 yield Err(anyhow::anyhow!(
-                    "LLM not configured. Press , for settings or set HNTUI_LLM_API_KEY"
+                    "LLM not configured. Press , to edit the config or set HNTUI_LLM_API_KEY"
                 ));
                 return;
             };

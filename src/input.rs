@@ -5,8 +5,6 @@ pub enum InputLayer {
     Help,
     Summary,
     Article,
-    SettingsEditor,
-    Settings,
     FeedFilter,
     FilterText,
     SearchText,
@@ -62,30 +60,13 @@ pub enum FeedFilterAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsAction {
-    MoveDown,
-    MoveUp,
-    Activate,
-    CloseAndSave,
-    Edit(TextAction),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The filter and search inputs are one-line fields; cursor movement and word
+/// deletion left with the settings popup that needed them.
 pub enum TextAction {
     Submit,
     Cancel,
     Insert(char),
     DeleteBackward,
-    DeleteForward,
-    DeleteWordBackward,
-    DeleteToStart,
-    DeleteToEnd,
-    MoveLeft,
-    MoveRight,
-    MoveWordLeft,
-    MoveWordRight,
-    MoveToStart,
-    MoveToEnd,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +93,6 @@ pub enum Action {
     Summary(SummaryAction),
     Article(ArticleAction),
     FeedFilter(FeedFilterAction),
-    Settings(SettingsAction),
     FilterInput(TextAction),
     SearchInput(TextAction),
     MoveDown,
@@ -136,7 +116,7 @@ pub enum Action {
     StartSearch,
     OpenFeedFilter,
     OpenFilter,
-    OpenSettings,
+    EditConfig,
     CopyComment,
     SelectStory(usize),
     SelectComment(usize),
@@ -184,22 +164,6 @@ impl KeyState {
                 }
                 _ => Action::Noop,
             },
-            InputLayer::Settings => match (key.code, key.modifiers) {
-                (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
-                    Action::Settings(SettingsAction::MoveDown)
-                }
-                (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => {
-                    Action::Settings(SettingsAction::MoveUp)
-                }
-                (KeyCode::Enter, _) => Action::Settings(SettingsAction::Activate),
-                (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
-                    Action::Settings(SettingsAction::CloseAndSave)
-                }
-                _ => Action::Noop,
-            },
-            InputLayer::SettingsEditor => settings_text_action(key)
-                .map(|action| Action::Settings(SettingsAction::Edit(action)))
-                .unwrap_or(Action::Noop),
             InputLayer::FilterText => text_action(key)
                 .map(Action::FilterInput)
                 .unwrap_or(Action::Noop),
@@ -313,7 +277,7 @@ impl KeyState {
             (KeyCode::Char('F'), KeyModifiers::SHIFT)
             | (KeyCode::Char('F'), KeyModifiers::NONE) => Action::OpenFilter,
             (KeyCode::Char('y'), KeyModifiers::NONE) => Action::CopyComment,
-            (KeyCode::Char(','), KeyModifiers::NONE) => Action::OpenSettings,
+            (KeyCode::Char(','), KeyModifiers::NONE) => Action::EditConfig,
             _ => Action::Noop,
         }
     }
@@ -351,31 +315,6 @@ fn text_action(key: KeyEvent) -> Option<TextAction> {
         {
             Some(TextAction::Insert(character))
         }
-        _ => None,
-    }
-}
-
-fn settings_text_action(key: KeyEvent) -> Option<TextAction> {
-    let control = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
-    match key.code {
-        KeyCode::Enter => Some(TextAction::Submit),
-        KeyCode::Esc => Some(TextAction::Cancel),
-        KeyCode::Left if alt => Some(TextAction::MoveWordLeft),
-        KeyCode::Left => Some(TextAction::MoveLeft),
-        KeyCode::Right if alt => Some(TextAction::MoveWordRight),
-        KeyCode::Right => Some(TextAction::MoveRight),
-        KeyCode::Home => Some(TextAction::MoveToStart),
-        KeyCode::End => Some(TextAction::MoveToEnd),
-        KeyCode::Char('a') if control => Some(TextAction::MoveToStart),
-        KeyCode::Char('e') if control => Some(TextAction::MoveToEnd),
-        KeyCode::Backspace if control || alt => Some(TextAction::DeleteWordBackward),
-        KeyCode::Backspace => Some(TextAction::DeleteBackward),
-        KeyCode::Delete => Some(TextAction::DeleteForward),
-        KeyCode::Char('w') if control => Some(TextAction::DeleteWordBackward),
-        KeyCode::Char('u') if control => Some(TextAction::DeleteToStart),
-        KeyCode::Char('k') if control => Some(TextAction::DeleteToEnd),
-        KeyCode::Char(character) if !control && !alt => Some(TextAction::Insert(character)),
         _ => None,
     }
 }

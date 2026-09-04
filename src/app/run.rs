@@ -127,6 +127,10 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
             }
         }
 
+        if app.take_editor_request() {
+            events = hand_terminal_to_editor(&mut tui, events, &mut app)?;
+        }
+
         if app.should_quit() {
             break;
         }
@@ -148,6 +152,30 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Hands the terminal to the Editor and takes it back.
+///
+/// The event stream goes first and comes back last: its reader thread blocks on
+/// the tty, so leaving it alive would let it eat the keystrokes meant for the
+/// editor.
+fn hand_terminal_to_editor(
+    tui: &mut Tui,
+    events: EventStream,
+    app: &mut App,
+) -> Result<EventStream> {
+    let path = app.config_path_for_editing();
+
+    // Taken by value so it is really gone before the editor starts, not merely
+    // replaced: a live stream's reader thread would compete for the tty.
+    drop(events);
+    tui.suspend().context("hand the terminal to the editor")?;
+
+    let outcome = crate::editor::edit(&path);
+
+    tui.resume().context("take the terminal back")?;
+    app.finish_config_edit(outcome);
+    Ok(EventStream::new())
 }
 
 #[cfg(test)]
