@@ -72,6 +72,13 @@ impl LlmSession {
     }
 }
 
+/// The Article text as the prompt will see it: whitespace-only extraction is
+/// nothing to ground a summary in. The overlay reports inclusion from this same
+/// rule, so its stats line cannot claim an article the prompt never carried.
+pub(crate) fn usable_article(article: Option<&str>) -> Option<&str> {
+    article.filter(|text| !text.trim().is_empty())
+}
+
 pub(crate) struct SummaryRequest {
     model: String,
     system_prompt: String,
@@ -174,7 +181,7 @@ impl Summarizer {
                 ));
                 return;
             };
-            let article = input.article.as_deref().filter(|text| !text.trim().is_empty());
+            let article = usable_article(input.article.as_deref());
             if input.comments.is_empty() && article.is_none() {
                 yield Err(anyhow::anyhow!("No comments to summarize"));
                 return;

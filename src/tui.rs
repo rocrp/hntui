@@ -8,6 +8,13 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{stdout, Stdout};
 use std::panic;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Set while an external program owns the terminal. The panic hook fires on
+/// whichever thread panicked — a background task counts, and a panicking task
+/// does not end the process — so without this it would emit its restore
+/// sequences into the editor's session.
+static TERMINAL_SUSPENDED: AtomicBool = AtomicBool::new(false);
 
 pub type TuiTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -48,12 +55,17 @@ impl Tui {
         self.terminal
             .show_cursor()
             .context("show cursor before handing over the terminal")?;
-        restore_terminal()
+        let restored = restore_terminal();
+        TERMINAL_SUSPENDED.store(true, Ordering::SeqCst);
+        restored
     }
 
     /// Takes the terminal back after an external program returns, redrawing
     /// from scratch since the screen and its size may both have changed.
     pub fn resume(&mut self) -> Result<()> {
+        // Cleared first: if claiming the terminal fails, dropping the Tui must
+        // still be allowed to restore it.
+        TERMINAL_SUSPENDED.store(false, Ordering::SeqCst);
         claim_terminal()?;
         self.terminal
             .clear()
@@ -98,7 +110,9 @@ fn restore_terminal() -> Result<()> {
 fn install_panic_hook() {
     let prev = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
-        let _ = restore_terminal();
+        if !TERMINAL_SUSPENDED.load(Ordering::SeqCst) {
+            let _ = restore_terminal();
+        }
         prev(info);
     }));
 }

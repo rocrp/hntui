@@ -20,6 +20,10 @@ fn prepare_article_cache_dir(dir: &std::path::Path) -> Result<std::path::PathBuf
     Ok(dir.to_path_buf())
 }
 
+/// Ceiling on how many queued events one frame absorbs, so draining a backlog
+/// cannot starve keyboard input.
+const MAX_EVENTS_PER_FRAME: usize = 256;
+
 pub async fn run(cli: Cli, config: Config) -> Result<()> {
     let resolved_cache_dir = match cli.file_cache_dir.clone() {
         Some(dir) => dir,
@@ -121,6 +125,18 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
                     return Err(anyhow::anyhow!("app event channel closed unexpectedly"));
                 };
                 app.handle_app_event(app_event);
+                // One redraw per event is fine at streaming speed, but a
+                // backlog is not: a summary that ran for the length of an
+                // editing session leaves thousands of chunks queued, and
+                // painting each one costs seconds of unresponsiveness. Take
+                // what is already waiting, capped so a fast producer cannot
+                // keep the loop from reading the keyboard.
+                for _ in 0..MAX_EVENTS_PER_FRAME {
+                    match rx.try_recv() {
+                        Ok(app_event) => app.handle_app_event(app_event),
+                        Err(_) => break,
+                    }
+                }
             }
             _ = tokio::time::sleep(tick_duration) => {
                 app.tick();
@@ -167,7 +183,11 @@ fn hand_terminal_to_editor(
     let path = app.config_path_for_editing();
 
     // Taken by value so it is really gone before the editor starts, not merely
-    // replaced: a live stream's reader thread would compete for the tty.
+    // replaced. Dropping it signals crossterm's reader thread to stop rather
+    // than joining it, so it may still be in a blocking read for a moment; a
+    // keypress landing in that window is buffered in crossterm's global reader,
+    // shared with the stream built below, and replayed after the handoff rather
+    // than swallowed.
     drop(events);
     tui.suspend().context("hand the terminal to the editor")?;
 

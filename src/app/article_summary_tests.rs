@@ -378,3 +378,45 @@ async fn a_self_post_without_a_body_completes_a_comments_only_summary_without_a_
     finish_summary(&mut app, &mut rx).await;
     assert_eq!(app.summary_overlay.state(), SummaryState::Done);
 }
+
+#[tokio::test]
+async fn a_blank_article_is_not_reported_as_included() {
+    let (mut app, mut rx) = app_with_summarize(vec![linked_story(1)], true);
+    app.apply_comments_for_story(
+        linked_story(1),
+        StoryThread::from_comments(vec![comment(11)]),
+        false,
+    );
+
+    app.handle_action(Action::Summarize);
+    assert!(app.tasks.is_running(TaskTarget::Article(1)));
+    // A page that extracts to whitespace still arrives as an Article, but the
+    // prompt drops it — the stats line must not claim it either.
+    app.deliver_article(
+        1,
+        Ok(Some(crate::article::Article {
+            title: None,
+            content: "   \n  ".to_string(),
+            effective_url: None,
+        })),
+    );
+    finish_summary(&mut app, &mut rx).await;
+
+    assert_eq!(app.summary_overlay.state(), SummaryState::Done);
+    app.summary_overlay
+        .handle_event(crate::summarizer::SummaryEvent::Complete {
+            stats: Some(crate::summarizer::SummaryStats {
+                duration: Duration::from_secs(1),
+                ttft: None,
+                input_tokens: 10,
+                output_tokens: 5,
+                estimated: false,
+                truncated: false,
+            }),
+        });
+    let line = app
+        .summary_overlay
+        .stats_line()
+        .expect("a finished summary has stats");
+    assert!(line.contains("article ✗"), "{line}");
+}

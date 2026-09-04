@@ -453,7 +453,8 @@ impl App {
         self.summary_overlay
             .set_comment_count(self.comment_list.len());
         self.summary_overlay.set_waiting_for(None);
-        self.summary_overlay.set_article_included(article.is_some());
+        self.summary_overlay
+            .set_article_included(crate::summarizer::usable_article(article.as_deref()).is_some());
         self.summary_overlay.set_article_notice(notice);
 
         let input = SummaryInput {

@@ -348,3 +348,17 @@ async fn the_started_event_carries_the_model_the_server_reported() {
         }
     );
 }
+
+#[test]
+fn whitespace_only_extraction_is_not_an_article() {
+    use super::usable_article;
+
+    assert_eq!(usable_article(Some("real text")), Some("real text"));
+    assert_eq!(
+        usable_article(Some("   \n\t ")),
+        None,
+        "nothing to ground a summary in"
+    );
+    assert_eq!(usable_article(Some("")), None);
+    assert_eq!(usable_article(None), None);
+}
