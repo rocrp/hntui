@@ -122,6 +122,13 @@ impl<Event: Send + 'static> TaskLifecycle<Event> {
             .is_some_and(|in_flight| in_flight.id == task)
     }
 
+    /// The task currently in flight for a target, for a test that has to hold
+    /// on to an id across a cancellation.
+    #[cfg(test)]
+    pub(crate) fn in_flight_task(&self, target: TaskTarget) -> Option<TaskId> {
+        self.in_flight.get(&target).map(|in_flight| in_flight.id)
+    }
+
     pub(crate) fn is_running(&self, target: TaskTarget) -> bool {
         self.in_flight.contains_key(&target)
     }

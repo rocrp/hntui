@@ -77,6 +77,12 @@ impl App {
     /// Performs the ConfigReload once the Editor has exited.
     pub fn finish_config_edit(&mut self, outcome: anyhow::Result<EditOutcome>) {
         self.last_error = None;
+        // Every branch below replaces config_status, so a test still in flight
+        // for the previous one has nowhere left to report. Cancelling here and
+        // not only in start_connection_test is what stops its late result from
+        // decorating an unrelated line — a red parse failure wearing a green
+        // tick for a config that was never loaded.
+        self.cancel_connection_test();
         match outcome {
             Err(error) => {
                 self.config_status =

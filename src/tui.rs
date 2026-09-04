@@ -42,6 +42,12 @@ impl Tui {
     /// thread sits in a blocking read on the tty and would swallow keystrokes
     /// meant for the editor.
     pub fn suspend(&mut self) -> Result<()> {
+        // Every frame hides the cursor, and leaving the alternate screen does
+        // not bring it back: cursor visibility is a terminal-global mode. An
+        // editor that draws its own cursor masks this; `ed` does not.
+        self.terminal
+            .show_cursor()
+            .context("show cursor before handing over the terminal")?;
         restore_terminal()
     }
 

@@ -791,3 +791,52 @@ async fn a_config_that_could_not_be_created_says_so_when_the_reload_finds_nothin
         status.message
     );
 }
+
+#[tokio::test]
+async fn a_test_in_flight_cannot_report_into_a_later_reload() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("config.toml");
+    std::fs::write(&path, "[summarize]\nmodel = \"openai/good\"\n").expect("write config");
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        Config::load_from_for_test(path.clone()).expect("load config"),
+        Summarizer::new(None, None, reqwest::Client::new()),
+        test_article_fetcher(),
+    );
+
+    // A first reload leaves a ConnectionTest running.
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
+    let stale = app
+        .tasks
+        .in_flight_task(TaskTarget::ConnectionTest)
+        .expect("the first reload starts a test");
+
+    // A second reload fails, so it starts no test of its own.
+    std::fs::write(&path, "[summarize\nbroken\n").expect("write broken config");
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
+    let status = app.config_status.as_ref().expect("failure reported");
+    assert!(status.failed, "{}", status.message);
+
+    // The first test's result arrives late and must be ignored.
+    app.handle_connection_test_finished(
+        stale,
+        Ok(crate::summarizer::ConnectionTestSuccess {
+            model: "openai/good".to_string(),
+            resolved_model: None,
+            ttft: std::time::Duration::from_millis(412),
+        }),
+    );
+
+    let status = app.config_status.as_ref().expect("status still there");
+    assert_eq!(
+        status.test,
+        crate::app::ConnectionTestState::Idle,
+        "a parse failure must not wear a success tick for a config never loaded"
+    );
+}

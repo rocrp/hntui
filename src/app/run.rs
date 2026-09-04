@@ -171,7 +171,10 @@ fn hand_terminal_to_editor(
     drop(events);
     tui.suspend().context("hand the terminal to the editor")?;
 
-    let outcome = crate::editor::edit(&path);
+    // Blocking, and on a single-core host that is the only worker thread: a
+    // streaming summary or an article fetch would freeze for the whole editing
+    // session and be dropped server-side.
+    let outcome = tokio::task::block_in_place(|| crate::editor::edit(&path));
 
     tui.resume().context("take the terminal back")?;
     app.finish_config_edit(outcome);

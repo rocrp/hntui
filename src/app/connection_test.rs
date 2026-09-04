@@ -13,7 +13,7 @@ impl App {
         let Some(draft) = connection_draft(&self.config) else {
             return;
         };
-        self.tasks.cancel(TaskTarget::ConnectionTest);
+        self.cancel_connection_test();
         self.set_connection_test_state(ConnectionTestState::Testing);
 
         let future = self.summarizer.test_connection(draft);
@@ -26,6 +26,11 @@ impl App {
             },
             |task, result| AppEvent::ConnectionTestFinished { task, result },
         );
+    }
+
+    /// Drops a test in flight, so its result cannot land on a later reload.
+    pub(super) fn cancel_connection_test(&mut self) {
+        self.tasks.cancel(TaskTarget::ConnectionTest);
     }
 
     pub(super) fn handle_connection_test_finished(
