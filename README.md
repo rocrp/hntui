@@ -143,6 +143,10 @@ set, a bare model name without the `provider/` prefix is also accepted (e.g.
 may carry a `!effort` suffix (`openai/gpt-5!high`) that sets its reasoning
 effort.
 
+Only `v` followed by digits counts as a version segment, so a `base_url` ending
+in `/v1beta` or `/v2alpha` is treated as an ordinary path and gets `/v1`
+appended. End it with `#` to use the URL verbatim.
+
 #### Base URL grammar
 
 For standard and custom OpenAI-compatible routes, `base_url` resolves as follows:
