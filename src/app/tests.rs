@@ -96,7 +96,8 @@ fn app_with_scrollable_summary() -> App {
         content: "one\n\ntwo\n\nthree\n\nfour".to_string(),
         reasoning: String::new(),
     });
-    app.summary_overlay.handle_event(SummaryEvent::Complete);
+    app.summary_overlay
+        .handle_event(SummaryEvent::Complete { stats: None });
     app.summary_overlay.set_viewport(40, 3);
     app
 }

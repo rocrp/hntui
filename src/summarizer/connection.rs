@@ -76,6 +76,7 @@ impl Summarizer {
                     model,
                     resolved_model,
                     mut chunks,
+                    ..
                 } = llm.start(request).await.map_err(ConnectionTestError::Llm)?;
 
                 while let Some(chunk) = chunks.next().await {

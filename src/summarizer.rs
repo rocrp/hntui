@@ -21,12 +21,31 @@ pub(crate) trait LlmStream: Send + Sync {
     fn start(&self, request: SummaryRequest) -> LlmFuture;
 }
 
+/// What one completed LLM call cost and whether it finished. Filled in once the
+/// stream is exhausted, so it is read after the last chunk, never before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SummaryStats {
+    pub duration: std::time::Duration,
+    pub ttft: Option<std::time::Duration>,
+    pub input_tokens: usize,
+    pub output_tokens: usize,
+    /// True when a token count is a chars/4 guess rather than the provider's own.
+    pub estimated: bool,
+    /// True when the answer was cut short: the model hit its output cap, or the
+    /// stream ended without its terminal frame.
+    pub truncated: bool,
+}
+
+/// Written by the chunk stream when it ends; read by the summarize loop after.
+pub(crate) type SharedStats = Arc<std::sync::Mutex<Option<SummaryStats>>>;
+
 pub(crate) struct LlmSession {
     model: String,
     /// What the server said is answering, when it said anything. Known by the
     /// time the session exists: the library waits for the first chunk before
     /// handing the stream over, and that frame names the model.
     resolved_model: Option<String>,
+    stats: SharedStats,
     chunks: BoxStream<'static, LlmResult<SummaryChunk>>,
 }
 
@@ -36,6 +55,7 @@ impl LlmSession {
         Self {
             model: model.to_string(),
             resolved_model: None,
+            stats: SharedStats::default(),
             chunks: Box::pin(futures::stream::iter(chunks)),
         }
     }
@@ -94,7 +114,11 @@ pub enum SummaryEvent {
         content: String,
         reasoning: String,
     },
-    Complete,
+    Complete {
+        /// What the call cost, when the backend reported enough to say. None
+        /// from a backend that reports nothing.
+        stats: Option<SummaryStats>,
+    },
 }
 
 #[derive(Clone)]
@@ -194,7 +218,12 @@ impl Summarizer {
                     }
                 }
             }
-            yield Ok(SummaryEvent::Complete);
+            let stats = session
+                .stats
+                .lock()
+                .ok()
+                .and_then(|stats| *stats);
+            yield Ok(SummaryEvent::Complete { stats });
         })
     }
 }
@@ -223,18 +252,42 @@ impl LlmStream for SmolLlmStream {
                 builder = builder.base_url(base_url);
             }
 
-            let stream = builder.await?;
+            let mut stream = builder.await?;
             let model = stream.model().to_string();
             let resolved_model = stream.resolved_model();
-            let chunks = stream.map(|chunk| {
-                chunk.map(|chunk| SummaryChunk {
-                    content: chunk.content,
-                    reasoning: chunk.reasoning,
-                })
-            });
+            let stats: SharedStats = SharedStats::default();
+            let sink = Arc::clone(&stats);
+            // The stream owns the response, so what it cost can be read from it
+            // the moment the last chunk has gone by.
+            let chunks = async_stream::stream! {
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(chunk) => yield Ok(SummaryChunk {
+                            content: chunk.content,
+                            reasoning: chunk.reasoning,
+                        }),
+                        Err(error) => {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                }
+                let usage = stream.usage();
+                if let Ok(mut sink) = sink.lock() {
+                    *sink = Some(SummaryStats {
+                        duration: usage.duration,
+                        ttft: usage.ttft,
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                        estimated: usage.estimated,
+                        truncated: stream.truncated(),
+                    });
+                }
+            };
             Ok(LlmSession {
                 model,
                 resolved_model,
+                stats,
                 chunks: Box::pin(chunks),
             })
         })

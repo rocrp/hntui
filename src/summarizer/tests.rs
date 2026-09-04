@@ -13,6 +13,7 @@ impl LlmStream for FakeLlmStream {
             Ok(LlmSession {
                 model: "fake/model".to_string(),
                 resolved_model: None,
+                stats: SharedStats::default(),
                 chunks: Box::pin(stream::iter(vec![
                     Ok(SummaryChunk {
                         content: String::new(),
@@ -44,6 +45,8 @@ impl LlmStream for FailingLlmStream {
             Ok(LlmSession {
                 model: "fake/model".to_string(),
                 resolved_model: None,
+
+                stats: SharedStats::default(),
                 chunks: Box::pin(stream::iter(vec![
                     Ok(SummaryChunk {
                         content: "partial".to_string(),
@@ -239,7 +242,7 @@ async fn fake_stream_emits_started_chunks_and_complete_in_order() {
                 content: "answer".to_string(),
                 reasoning: String::new()
             },
-            SummaryEvent::Complete,
+            SummaryEvent::Complete { stats: None },
         ]
     );
 }

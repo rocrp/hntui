@@ -1,5 +1,5 @@
 use crate::api::types::Story;
-use crate::summarizer::SummaryEvent;
+use crate::summarizer::{SummaryEvent, SummaryStats};
 use crate::ui::{clamped_scroll::ClampedScroll, markdown, overlay, theme};
 #[cfg(not(target_os = "android"))]
 use anyhow::Context;
@@ -38,6 +38,10 @@ pub struct SummaryOverlay {
     /// The ResolvedModel, when the server named one that differs from what was
     /// requested.
     resolved_model: Option<String>,
+    /// What the finished call cost. None until it finishes.
+    stats: Option<SummaryStats>,
+    /// Whether the summary was grounded in the Article.
+    article_included: bool,
     copied_flash: Option<Instant>,
     story_title: String,
     story_url: Option<String>,
@@ -60,6 +64,8 @@ impl SummaryOverlay {
         self.article_notice = None;
         self.model_name.clear();
         self.resolved_model = None;
+        self.stats = None;
+        self.article_included = false;
         self.copied_flash = None;
         self.story_title = story.title.clone();
         self.story_url = story.url.clone();
@@ -83,6 +89,11 @@ impl SummaryOverlay {
     }
 
     /// Announce that the summary is comments-only because the Article failed.
+    /// Whether the Article made it into the prompt.
+    pub fn set_article_included(&mut self, included: bool) {
+        self.article_included = included;
+    }
+
     pub fn set_article_notice(&mut self, notice: Option<String>) {
         self.article_notice = notice;
         self.reflow();
@@ -126,7 +137,10 @@ impl SummaryOverlay {
                     }
                 }
             }
-            SummaryEvent::Complete => self.state = SummaryState::Done,
+            SummaryEvent::Complete { stats } => {
+                self.stats = stats;
+                self.state = SummaryState::Done;
+            }
         }
         self.reflow();
     }
@@ -209,6 +223,36 @@ impl SummaryOverlay {
         self.state != SummaryState::Idle
     }
 
+    /// Whether the answer was cut short. Only known once the call finished.
+    pub(crate) fn truncated(&self) -> bool {
+        self.stats.is_some_and(|stats| stats.truncated)
+    }
+
+    /// The one-line cost summary shown beside the key hints once a summary is
+    /// done: what went in, how long it took, and what it spent.
+    pub(crate) fn stats_line(&self) -> Option<String> {
+        let stats = self.stats?;
+        let article = if self.article_included { "✓" } else { "✗" };
+        let mut parts = vec![
+            format!("{} comments", self.comment_count),
+            format!("article {article}"),
+            format_duration(stats.duration),
+        ];
+        if let Some(ttft) = stats.ttft {
+            parts.push(format!("ttft {}", format_duration(ttft)));
+        }
+        // A chars/4 guess is not a measurement; showing it would invite the
+        // reader to trust a number nobody counted.
+        if !stats.estimated {
+            parts.push(format!(
+                "{}→{} tok",
+                format_tokens(stats.input_tokens),
+                format_tokens(stats.output_tokens)
+            ));
+        }
+        Some(parts.join(" · "))
+    }
+
     /// How the model reads in the title: `requested → resolved` when a proxy or
     /// alias resolved it to something else, the requested spec alone otherwise.
     pub(crate) fn model_label(&self) -> String {
@@ -231,6 +275,12 @@ impl SummaryOverlay {
         output.push_str(&format!("model: {}\n", self.model_name));
         if let Some(resolved) = &self.resolved_model {
             output.push_str(&format!("resolved_model: {resolved}\n"));
+        }
+        if let Some(stats) = self.stats {
+            output.push_str(&format!("duration: {}\n", format_duration(stats.duration)));
+            if stats.truncated {
+                output.push_str("truncated: true\n");
+            }
         }
         output.push_str(&overlay::front_matter_date(self.story_time));
         output.push_str("---\n\n");
@@ -260,25 +310,41 @@ impl SummaryOverlay {
                 lines
             }
             SummaryState::Done => markdown::render_markdown(&self.summary),
-            SummaryState::Error => vec![Line::from(Span::styled(
-                self.error.as_deref().unwrap_or("Unknown error").to_string(),
-                theme::ERROR,
-            ))],
+            // Whatever streamed before the failure is still worth reading, so
+            // it stays above the error rather than being thrown away with it.
+            SummaryState::Error => {
+                let mut lines = markdown::render_markdown(&self.summary);
+                if !lines.is_empty() {
+                    lines.push(Line::raw(""));
+                }
+                lines.push(Line::from(Span::styled(
+                    self.error.as_deref().unwrap_or("Unknown error").to_string(),
+                    theme::ERROR,
+                )));
+                lines
+            }
             SummaryState::Idle => return Vec::new(),
         };
 
-        let Some(notice) = &self.article_notice else {
-            return body;
-        };
-        let mut lines = vec![
-            Line::from(Span::styled(
+        let mut notices: Vec<Line<'static>> = Vec::new();
+        if let Some(notice) = &self.article_notice {
+            notices.push(Line::from(Span::styled(
                 format!("⚠ article unavailable ({notice}) — comments only"),
                 theme::WARN,
-            )),
-            Line::raw(""),
-        ];
-        lines.extend(body);
-        lines
+            )));
+        }
+        if self.truncated() {
+            notices.push(Line::from(Span::styled(
+                "⚠ output truncated".to_string(),
+                theme::WARN,
+            )));
+        }
+        if notices.is_empty() {
+            return body;
+        }
+        notices.push(Line::raw(""));
+        notices.extend(body);
+        notices
     }
 
     fn content_paragraph(&self, spinner: char) -> Paragraph<'static> {
@@ -300,6 +366,23 @@ impl SummaryOverlay {
     pub fn copy_summary(&mut self) -> Result<()> {
         anyhow::bail!("clipboard unavailable on Android")
     }
+}
+
+/// Sub-second times read better in milliseconds; anything longer in seconds.
+fn format_duration(duration: std::time::Duration) -> String {
+    if duration < std::time::Duration::from_secs(1) {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{:.1}s", duration.as_secs_f64())
+    }
+}
+
+/// Token counts are read at a glance, so thousands are abbreviated.
+fn format_tokens(tokens: usize) -> String {
+    if tokens < 1_000 {
+        return tokens.to_string();
+    }
+    format!("{:.1}k", tokens as f64 / 1_000.0)
 }
 
 pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
@@ -353,7 +436,29 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
         };
         Line::from(Span::styled(text, theme::HINT))
     };
-    frame.render_widget(Paragraph::new(hint).style(theme::POPUP), areas.hint);
+    // The stats share the hint row rather than claiming a line of their own:
+    // the overlay geometry is shared with the Article overlay, and the hints
+    // leave most of the row empty anyway.
+    let stats = overlay.stats_line();
+    let hint_area = match &stats {
+        Some(stats) => {
+            let width = u16::try_from(stats.chars().count() + 2).unwrap_or(u16::MAX);
+            let [hint_area, stats_area] = ratatui::layout::Layout::horizontal([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(width.min(areas.hint.width)),
+            ])
+            .areas(areas.hint);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(stats.clone(), theme::META)))
+                    .alignment(ratatui::layout::Alignment::Right)
+                    .style(theme::POPUP),
+                stats_area,
+            );
+            hint_area
+        }
+        None => areas.hint,
+    };
+    frame.render_widget(Paragraph::new(hint).style(theme::POPUP), hint_area);
 }
 
 pub(crate) fn popup_rect(area: Rect) -> Option<Rect> {

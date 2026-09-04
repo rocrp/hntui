@@ -1,6 +1,22 @@
 use super::*;
 use crate::api::types::Story;
-use crate::summarizer::SummaryEvent;
+use crate::summarizer::{SummaryEvent, SummaryStats};
+use std::time::Duration;
+
+/// The overlay body as plain text, the way a reader sees it.
+fn rendered_text(overlay: &SummaryOverlay) -> String {
+    overlay
+        .content_lines('|')
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 pub(super) fn story() -> Story {
     Story {
@@ -37,7 +53,7 @@ fn reducer_accumulates_reasoning_then_content_without_mixing_them() {
         content: "world".to_string(),
         reasoning: "ignored after content".to_string(),
     });
-    overlay.handle_event(SummaryEvent::Complete);
+    overlay.handle_event(SummaryEvent::Complete { stats: None });
 
     assert_eq!(overlay.state(), SummaryState::Done);
     assert_eq!(overlay.reasoning, "thinking");
@@ -83,7 +99,7 @@ pub(super) fn completed_overlay(summary: &str) -> SummaryOverlay {
         content: summary.to_string(),
         reasoning: String::new(),
     });
-    overlay.handle_event(SummaryEvent::Complete);
+    overlay.handle_event(SummaryEvent::Complete { stats: None });
     overlay
 }
 
@@ -235,7 +251,7 @@ fn copied_front_matter_carries_the_resolved_model_only_when_it_differs() {
         content: "summary".to_string(),
         reasoning: String::new(),
     });
-    overlay.handle_event(SummaryEvent::Complete);
+    overlay.handle_event(SummaryEvent::Complete { stats: None });
 
     let copied = overlay.copy_text();
     assert!(copied.contains("model: smolserver/summary\n"), "{copied}");
@@ -243,8 +259,126 @@ fn copied_front_matter_carries_the_resolved_model_only_when_it_differs() {
 
     overlay.begin(&story(), 3);
     overlay.handle_event(started("gemini/flash", None));
-    overlay.handle_event(SummaryEvent::Complete);
+    overlay.handle_event(SummaryEvent::Complete { stats: None });
     let copied = overlay.copy_text();
     assert!(copied.contains("model: gemini/flash\n"), "{copied}");
     assert!(!copied.contains("resolved_model:"), "{copied}");
+}
+
+// --- #31: stats, truncation, partial text on error --------------------------
+
+fn stats(estimated: bool, truncated: bool) -> SummaryStats {
+    SummaryStats {
+        duration: Duration::from_millis(12_300),
+        ttft: Some(Duration::from_millis(800)),
+        input_tokens: 9_182,
+        output_tokens: 1_104,
+        estimated,
+        truncated,
+    }
+}
+
+fn finished(overlay: &mut SummaryOverlay, stats: Option<SummaryStats>) {
+    overlay.handle_event(SummaryEvent::Chunk {
+        content: "the summary".to_string(),
+        reasoning: String::new(),
+    });
+    overlay.handle_event(SummaryEvent::Complete { stats });
+}
+
+#[test]
+fn the_stats_line_reports_what_went_in_and_what_it_cost() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 220);
+    overlay.set_comment_count(220);
+    overlay.set_article_included(true);
+    finished(&mut overlay, Some(stats(false, false)));
+
+    assert_eq!(
+        overlay.stats_line().as_deref(),
+        Some("220 comments · article ✓ · 12.3s · ttft 800ms · 9.2k→1.1k tok")
+    );
+}
+
+#[test]
+fn estimated_token_counts_are_left_out_rather_than_shown_as_fact() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 220);
+    overlay.set_comment_count(220);
+    overlay.set_article_included(false);
+    finished(&mut overlay, Some(stats(true, false)));
+
+    let line = overlay.stats_line().expect("a finished summary has stats");
+    assert!(
+        !line.contains("tok"),
+        "a chars/4 guess is not a measurement: {line}"
+    );
+    assert!(line.contains("article ✗"), "{line}");
+}
+
+#[test]
+fn there_are_no_stats_before_a_summary_finishes() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    overlay.handle_event(SummaryEvent::Chunk {
+        content: "partial".to_string(),
+        reasoning: String::new(),
+    });
+
+    assert_eq!(overlay.stats_line(), None);
+    assert!(!overlay.truncated());
+}
+
+#[test]
+fn a_truncated_answer_is_flagged_in_the_body_and_the_copy() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    finished(&mut overlay, Some(stats(false, true)));
+
+    assert!(overlay.truncated());
+    let rendered = rendered_text(&overlay);
+    assert!(rendered.contains("⚠ output truncated"), "{rendered}");
+
+    let copied = overlay.copy_text();
+    assert!(copied.contains("truncated: true\n"), "{copied}");
+    assert!(copied.contains("duration: 12.3s\n"), "{copied}");
+}
+
+#[test]
+fn a_complete_answer_carries_no_truncation_warning() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    finished(&mut overlay, Some(stats(false, false)));
+
+    let rendered = rendered_text(&overlay);
+    assert!(!rendered.contains("truncated"), "{rendered}");
+    assert!(!overlay.copy_text().contains("truncated"));
+}
+
+#[test]
+fn a_failure_partway_through_keeps_what_already_streamed() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+    overlay.handle_event(SummaryEvent::Chunk {
+        content: "half an answer".to_string(),
+        reasoning: String::new(),
+    });
+
+    overlay.fail("connection reset".to_string());
+
+    let rendered = rendered_text(&overlay);
+    assert!(rendered.contains("half an answer"), "{rendered}");
+    assert!(rendered.contains("connection reset"), "{rendered}");
+}
+
+#[test]
+fn a_failure_before_any_content_shows_only_the_error() {
+    let mut overlay = SummaryOverlay::default();
+    overlay.begin(&story(), 3);
+
+    overlay.fail("cannot reach host".to_string());
+
+    let rendered = rendered_text(&overlay);
+    assert!(rendered.contains("cannot reach host"), "{rendered}");
+    assert_eq!(rendered.trim(), "cannot reach host");
 }
