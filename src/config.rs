@@ -189,7 +189,16 @@ impl Config {
 
     /// Re-reads this config's file. The caller keeps the current config when
     /// this fails, so a typo in the file never takes the app down with it.
+    ///
+    /// A missing file is a failure here, unlike at startup: reaching this point
+    /// means the file was supposed to be there, and treating its absence as an
+    /// empty config would silently wipe the settings the session is running on.
     pub fn reload(&self) -> Result<Self> {
+        anyhow::ensure!(
+            self.path.exists(),
+            "config {} does not exist",
+            self.path.display()
+        );
         Self::load_from(vec![self.path.clone()], self.path.clone())
     }
 

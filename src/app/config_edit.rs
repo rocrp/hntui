@@ -61,10 +61,16 @@ impl App {
 
     /// The file the Editor should open, created from the template first when it
     /// does not exist yet.
+    ///
+    /// A seeding failure is remembered rather than raised: the Editor still
+    /// opens, and the user may write the file themselves. It becomes the
+    /// explanation only if the reload then finds nothing there.
     pub fn config_path_for_editing(&mut self) -> std::path::PathBuf {
-        if let Err(error) = self.config.ensure_file_exists() {
-            self.last_error = Some(format!("config: {error:#}"));
-        }
+        self.config_seed_error = self
+            .config
+            .ensure_file_exists()
+            .err()
+            .map(|error| format!("{error:#}"));
         self.config.path().to_path_buf()
     }
 
@@ -83,6 +89,7 @@ impl App {
             }
             Ok(EditOutcome::Finished) => self.reload_config(),
         }
+        self.config_seed_error = None;
     }
 
     fn reload_config(&mut self) {
@@ -112,7 +119,13 @@ impl App {
             // The running config stays in force: a typo must not take the
             // session down with it.
             Err(error) => {
-                self.config_status = Some(ConfigStatus::failure(format!("{path}: {error:#}")));
+                let mut message = format!("{path}: {error:#}");
+                // A file that could not be created is why there was nothing to
+                // read; without this the reload just reports the symptom.
+                if let Some(reason) = &self.config_seed_error {
+                    message.push_str(&format!(" (could not create it: {reason})"));
+                }
+                self.config_status = Some(ConfigStatus::failure(message));
             }
         }
     }

@@ -754,3 +754,40 @@ async fn dismissing_summary_cancels_stream_and_rejects_queued_chunks() {
     assert!(!app.summary_overlay.is_visible());
     assert!(!app.tasks.is_running(TaskTarget::Summary));
 }
+
+#[tokio::test]
+async fn a_config_that_could_not_be_created_says_so_when_the_reload_finds_nothing() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    // A file where the config's parent directory should be, so creating it fails.
+    let blocker = directory.path().join("blocked");
+    std::fs::write(&blocker, "occupied").expect("write blocker");
+    let path = blocker.join("config.toml");
+
+    let source = Arc::new(InMemorySource::default());
+    let sources = Sources::new(source.clone(), source);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut app = App::new(
+        cli(),
+        sources,
+        tx,
+        None,
+        Config::for_test(path.clone()),
+        Summarizer::new(None, None, reqwest::Client::new()),
+        test_article_fetcher(),
+    );
+
+    let opened = app.config_path_for_editing();
+    assert_eq!(opened, path, "the editor is still offered a path");
+    app.finish_config_edit(Ok(crate::editor::EditOutcome::Finished));
+
+    let status = app
+        .config_status
+        .as_ref()
+        .expect("a failed reload reports itself");
+    assert!(status.failed, "{}", status.message);
+    assert!(
+        status.message.contains("could not create it"),
+        "the reload must explain why there was nothing to read: {}",
+        status.message
+    );
+}

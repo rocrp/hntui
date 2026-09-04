@@ -198,6 +198,9 @@ pub struct App {
     /// What the last ConfigReload did, shown in the status line until the user
     /// moves on.
     pub config_status: Option<ConfigStatus>,
+    /// Why the config file could not be seeded from the template, if it could
+    /// not. Explains a reload that then finds nothing to read.
+    config_seed_error: Option<String>,
     config: Config,
     pub keyword_filter: String,
     pub visible_story_indices: Vec<usize>,
@@ -276,6 +279,7 @@ impl App {
             feed_filter_popup: None,
             editor_requested: false,
             config_status: None,
+            config_seed_error: None,
             config,
             keyword_filter: String::new(),
             visible_story_indices: vec![],
