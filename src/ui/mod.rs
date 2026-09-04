@@ -80,15 +80,27 @@ pub(crate) fn config_status_line(
             theme::HINT
         },
     );
+    // While nothing has been tested yet the endpoint is the useful detail; once
+    // a real request has been down that path, its result says more, and the row
+    // has no space for both.
     let tail = match &status.test {
-        ConnectionTestState::Idle => None,
-        ConnectionTestState::Testing => Some(Span::styled(" · testing…", theme::HINT)),
+        ConnectionTestState::Idle => status
+            .detail
+            .as_ref()
+            .map(|detail| Span::styled(format!(" · {detail}"), theme::HINT)),
+        ConnectionTestState::Testing => Some(Span::styled(
+            match &status.detail {
+                Some(detail) => format!(" · {detail} · ⏳ testing"),
+                None => " · ⏳ testing".to_string(),
+            },
+            theme::HINT,
+        )),
         ConnectionTestState::Success { model, ttft } => Some(Span::styled(
-            format!(" · ok {model} · {}", format_ttft(*ttft)),
+            format!(" · ✓ {model} · {}", format_ttft(*ttft)),
             theme::SUCCESS,
         )),
         ConnectionTestState::Error(message) => {
-            Some(Span::styled(format!(" · {message}"), theme::ERROR))
+            Some(Span::styled(format!(" · ✗ {message}"), theme::ERROR))
         }
     };
     match tail {

@@ -28,8 +28,23 @@ pub(crate) enum ConnectionTestState {
 pub struct ConfigStatus {
     /// Leading text: either the reload line or the reason it failed.
     pub message: String,
+    /// Where the key came from and where requests will go. Dropped once the
+    /// ConnectionTest settles: the status line is one row, and a test that
+    /// actually reached the endpoint says more than the URL did.
+    pub detail: Option<String>,
     pub failed: bool,
     pub test: ConnectionTestState,
+}
+
+impl ConfigStatus {
+    fn failure(message: String) -> Self {
+        Self {
+            message,
+            detail: None,
+            failed: true,
+            test: ConnectionTestState::Idle,
+        }
+    }
 }
 
 impl App {
@@ -58,18 +73,13 @@ impl App {
         self.last_error = None;
         match outcome {
             Err(error) => {
-                self.config_status = Some(ConfigStatus {
-                    message: format!("editor failed: {error:#}"),
-                    failed: true,
-                    test: ConnectionTestState::Idle,
-                });
+                self.config_status =
+                    Some(ConfigStatus::failure(format!("editor failed: {error:#}")));
             }
             Ok(EditOutcome::Cancelled { status }) => {
-                self.config_status = Some(ConfigStatus {
-                    message: format!("editor exited with status {status} · config not reloaded"),
-                    failed: true,
-                    test: ConnectionTestState::Idle,
-                });
+                self.config_status = Some(ConfigStatus::failure(format!(
+                    "editor exited with status {status} · config not reloaded"
+                )));
             }
             Ok(EditOutcome::Finished) => self.reload_config(),
         }
@@ -81,16 +91,15 @@ impl App {
             Ok(config) => {
                 let endpoint = resolved_endpoint(&config);
                 self.apply_config(config);
-                let mut message = format!("config reloaded · {path}");
+                let mut detail: Vec<String> = Vec::new();
                 if let Some(key_source) = self.config.effective_api_key().status() {
-                    message.push_str(&format!(" · {key_source}"));
+                    detail.push(key_source);
                 }
-                if let Some(endpoint) = endpoint {
-                    message.push_str(&format!(" · {endpoint}"));
-                }
+                detail.extend(endpoint);
                 let configured = self.config.summarize().is_some();
                 self.config_status = Some(ConfigStatus {
-                    message,
+                    message: format!("config reloaded · {path}"),
+                    detail: (!detail.is_empty()).then(|| detail.join(" · ")),
                     failed: false,
                     test: ConnectionTestState::Idle,
                 });
@@ -103,11 +112,7 @@ impl App {
             // The running config stays in force: a typo must not take the
             // session down with it.
             Err(error) => {
-                self.config_status = Some(ConfigStatus {
-                    message: format!("{path}: {error:#}"),
-                    failed: true,
-                    test: ConnectionTestState::Idle,
-                });
+                self.config_status = Some(ConfigStatus::failure(format!("{path}: {error:#}")));
             }
         }
     }
@@ -162,6 +167,67 @@ fn display_path(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::ui::config_status_line;
+
+    fn rendered(status: &ConfigStatus) -> String {
+        config_status_line(status)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    fn reloaded() -> ConfigStatus {
+        ConfigStatus {
+            message: "config reloaded · ~/.config/hntui/config.toml".to_string(),
+            detail: Some(
+                "set by HNTUI_LLM_API_KEY · POST https://gateway.example/v1/chat/completions"
+                    .to_string(),
+            ),
+            failed: false,
+            test: ConnectionTestState::Idle,
+        }
+    }
+
+    #[test]
+    fn the_endpoint_shows_until_a_real_request_has_been_down_that_path() {
+        let mut status = reloaded();
+        assert!(rendered(&status).contains("POST https://gateway.example"));
+
+        status.test = ConnectionTestState::Testing;
+        let testing = rendered(&status);
+        assert!(
+            testing.contains("POST https://gateway.example"),
+            "{testing}"
+        );
+        assert!(testing.contains("⏳ testing"), "{testing}");
+
+        status.test = ConnectionTestState::Success {
+            model: "smolserver/summary → gpt-5!high".to_string(),
+            ttft: Duration::from_millis(400),
+        };
+        let success = rendered(&status);
+        assert_eq!(
+            success,
+            "config reloaded · ~/.config/hntui/config.toml · ✓ smolserver/summary → gpt-5!high · 400ms"
+        );
+
+        status.test = ConnectionTestState::Error("check API key".to_string());
+        let failed = rendered(&status);
+        assert_eq!(
+            failed,
+            "config reloaded · ~/.config/hntui/config.toml · ✗ check API key"
+        );
+    }
+
+    #[test]
+    fn a_failed_reload_says_only_what_went_wrong() {
+        let status = ConfigStatus::failure("~/config.toml: parse error at line 2".to_string());
+
+        assert!(status.failed);
+        assert_eq!(rendered(&status), "~/config.toml: parse error at line 2");
+    }
 
     #[test]
     fn a_home_path_is_shortened_for_the_status_line() {

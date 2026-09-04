@@ -106,6 +106,18 @@ A file that fails to parse, or that sets an empty model or a limit of zero,
 leaves the running configuration in force and reports the problem in the status
 line. Quitting the editor non-zero (vim's `:cq`) discards the edit entirely.
 
+When the reloaded file configures an LLM, hntui immediately sends one minimal
+request along the exact path a summary would take, and reports it in the status
+line:
+
+```
+config reloaded · ~/.config/hntui/config.toml · ✓ smolserver/summary → gpt-5!high · 0.4s
+config reloaded · ~/.config/hntui/config.toml · ✗ check API key
+```
+
+Until that request settles the line shows the resolved POST URL instead. Where
+a proxy or alias resolves the request to a different model, both are named.
+
 ### AI summarization (`config.toml`)
 
 Press `s` on any story to summarize its discussion. Requires an LLM API key.
