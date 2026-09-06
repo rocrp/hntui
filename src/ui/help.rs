@@ -122,6 +122,7 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     lines.push(kv("l / →", "expand thread (loads children)"));
     lines.push(kv("Enter / c", "toggle collapse/expand"));
     lines.push(kv("y", "copy selected comment to clipboard"));
+    lines.push(kv("H", "hand off to another agent (paste link)"));
     lines.push(kv("o", "open comments page (browser)"));
     lines.push(kv("O", "open source link (browser)"));
     lines.push(kv("s", "summarize (AI)"));
@@ -144,6 +145,7 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
     lines.push(kv("Tab / Shift+Tab", "next / previous article link"));
     lines.push(kv("Enter", "open selected article link (browser)"));
     lines.push(kv("c", "copy article to clipboard"));
+    lines.push(kv("H", "hand off to another agent (paste link)"));
     lines.push(kv("o", "open Story's original URL (browser)"));
     lines.push(kv("q / Esc", "close (cancels a running fetch)"));
     lines

@@ -446,3 +446,71 @@ async fn an_article_still_fetching_is_refused_rather_than_waited_on() {
     }
     assert!(pastes.requests().is_empty());
 }
+
+#[tokio::test]
+async fn h_in_the_article_overlay_hands_off_the_story_it_is_showing() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes.clone());
+    let item = story(42);
+    with_comments(&mut harness.app, &item, vec![comment(11)]);
+    with_article(&mut harness.app, &item, "The article text.");
+    harness.app.handle_action(Action::ViewArticle);
+    assert_eq!(
+        harness.app.input_layer(),
+        crate::input::InputLayer::Article,
+        "the article overlay should have the input"
+    );
+
+    harness.hand_off().await;
+
+    let (filename, content) = pastes
+        .requests()
+        .first()
+        .cloned()
+        .expect("a paste was created");
+    assert_eq!(filename, "hn-42.md");
+    assert!(
+        content.contains("## Article\n\nThe article text.\n"),
+        "{content}"
+    );
+    assert!(content.contains("## Comments\n\nbob: hello"), "{content}");
+    assert!(!content.contains("## Summary"), "{content}");
+}
+
+#[tokio::test]
+async fn h_in_the_comments_view_hands_off_the_discussion() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes.clone());
+    let item = story(42);
+    with_comments(&mut harness.app, &item, vec![comment(11)]);
+    assert_eq!(harness.app.view, View::Comments);
+
+    harness.hand_off().await;
+
+    let content = pastes.last_content().expect("a paste was created");
+    assert!(content.starts_with("---\ntitle: \"story 42\""), "{content}");
+    assert!(
+        content.ends_with("## Comments\n\nbob: hello\n"),
+        "{content}"
+    );
+    assert!(!content.contains("## Article"), "{content}");
+    assert!(!content.contains("model:"), "{content}");
+}
+
+#[tokio::test]
+async fn a_dismissed_summary_is_not_carried_by_a_later_handoff() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes.clone());
+    let item = story(42);
+    with_comments(&mut harness.app, &item, vec![comment(11)]);
+    with_done_summary(&mut harness.app, &item);
+    harness
+        .app
+        .handle_action(Action::Summary(crate::input::SummaryAction::Dismiss));
+
+    harness.hand_off().await;
+
+    let content = pastes.last_content().expect("a paste was created");
+    assert!(!content.contains("## Summary"), "{content}");
+    assert!(content.contains("## Comments"), "{content}");
+}

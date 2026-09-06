@@ -52,6 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `Enter`, `c` | Toggle collapse |
 | `o` / `O` | Open HN / source link |
 | `y` | Copy selected comment |
+| `H` | Hand off to another agent |
 | `s` | Summarize (requires LLM key) |
 | `v` | View article (requires localwebrs) |
 | `r` | Refresh |
@@ -79,6 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `Tab` / `Shift+Tab` | Select next / previous article link |
 | `Enter` | Open selected article link (browser) |
 | `c` | Copy article to clipboard |
+| `H` | Hand off to another agent |
 | `o` | Open the Story's original URL (browser) |
 | `q`, `Esc` | Close (cancels a running fetch) |
 

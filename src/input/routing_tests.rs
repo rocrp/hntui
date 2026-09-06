@@ -276,3 +276,33 @@ fn help_scroll_keys_route_to_help_actions() {
         assert_eq!(KeyState::default().on_key(InputLayer::Help, key), expected);
     }
 }
+
+#[test]
+fn h_is_the_same_handoff_action_in_every_layer_that_shows_a_story() {
+    for layer in [InputLayer::View, InputLayer::Summary, InputLayer::Article] {
+        assert_eq!(
+            KeyState::default().on_key(layer, key(KeyCode::Char('H'))),
+            Action::Handoff,
+            "{layer:?} should hand off"
+        );
+    }
+}
+
+#[test]
+fn shifted_h_hands_off_too_since_that_is_how_the_key_arrives() {
+    assert_eq!(
+        KeyState::default().on_key(
+            InputLayer::Summary,
+            KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)
+        ),
+        Action::Handoff
+    );
+}
+
+#[test]
+fn lowercase_h_still_collapses_a_thread() {
+    assert_eq!(
+        KeyState::default().on_key(InputLayer::View, key(KeyCode::Char('h'))),
+        Action::Collapse
+    );
+}
