@@ -57,15 +57,17 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let now = now_unix();
     let show_copied = app.copied_flash.is_some_and(|t| t.elapsed().as_secs() < 2);
-    let meta = if show_copied {
+    let meta = if let Some(status) = app.handoff_status.as_ref() {
+        // A Handoff is the newest thing the user asked for, and its URL is the
+        // whole deliverable — it must not sit behind an error from earlier.
+        super::handoff_status_line(status)
+    } else if show_copied {
         Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
             theme::ERROR,
         )])
-    } else if let Some(status) = app.handoff_status.as_ref() {
-        super::handoff_status_line(status)
     } else if let Some(status) = app.config_status.as_ref() {
         super::config_status_line(status)
     } else if let Some(story) = app.current_story.as_ref() {

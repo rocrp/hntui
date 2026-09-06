@@ -183,9 +183,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(footer_block, footer_area);
 
     let show_copied = app.copied_flash.is_some_and(|t| t.elapsed().as_secs() < 2);
-    let meta = if show_copied {
-        Line::from(Span::styled("Copied!", theme::SUCCESS))
-    } else if app.filter_input_active {
+    let meta = if app.filter_input_active {
         let cursor = format!("Filter: {}│", app.keyword_filter);
         Line::from(vec![
             Span::styled(cursor, theme::KEY),
@@ -206,13 +204,17 @@ pub fn render(frame: &mut Frame, app: &App) {
             Span::raw("  "),
             Span::styled("Enter:search  Esc:cancel", theme::HINT),
         ])
+    } else if let Some(status) = app.handoff_status.as_ref() {
+        // A Handoff is the newest thing the user asked for, and its URL is the
+        // whole deliverable — it must not sit behind an error from earlier.
+        super::handoff_status_line(status)
+    } else if show_copied {
+        Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else if let Some(err) = app.last_error.as_deref() {
         Line::from(vec![Span::styled(
             format!("Error: {}", format_error(err)),
             theme::ERROR,
         )])
-    } else if let Some(status) = app.handoff_status.as_ref() {
-        super::handoff_status_line(status)
     } else if let Some(status) = app.config_status.as_ref() {
         super::config_status_line(status)
     } else if let Some(story) = app.selected_story() {

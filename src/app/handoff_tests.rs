@@ -514,3 +514,38 @@ async fn a_dismissed_summary_is_not_carried_by_a_later_handoff() {
     assert!(!content.contains("## Summary"), "{content}");
     assert!(content.contains("## Comments"), "{content}");
 }
+
+#[tokio::test]
+async fn the_handoff_line_is_not_hidden_by_an_error_from_earlier() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes);
+    let item = story(42);
+    with_comments(&mut harness.app, &item, vec![comment(11)]);
+    harness.app.last_error = Some("something failed earlier".to_string());
+
+    harness.hand_off().await;
+
+    // The footer picks one line; the Handoff has to win it, or the URL the
+    // user just asked for never reaches the screen.
+    harness
+        .app
+        .prepare_frame(ratatui::layout::Rect::new(0, 0, 120, 24));
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).expect("test terminal");
+    terminal
+        .draw(|frame| crate::ui::render(frame, &harness.app))
+        .expect("draw");
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert!(
+        rendered.contains("handoff → https://paste.example"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("something failed earlier"), "{rendered}");
+}
