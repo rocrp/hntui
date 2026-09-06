@@ -1,6 +1,7 @@
 use crate::api::{CommentNode, FeedKind, Sources, Story, StoryThread};
 use crate::article::{Article, ArticleFetcher};
 use crate::browser::{SystemUrlOpener, UrlOpener};
+use crate::clipboard::{Clipboard, SystemClipboard};
 use crate::config::Config;
 use crate::input::KeyState;
 use crate::logging;
@@ -21,6 +22,8 @@ mod article_summary_tests;
 #[cfg(test)]
 mod article_tests;
 mod articles;
+#[cfg(test)]
+mod clipboard_tests;
 mod comment_tree;
 mod comments;
 mod config_edit;
@@ -186,6 +189,7 @@ pub struct App {
     article_fetcher: ArticleFetcher,
     articles: ArticleStore,
     url_opener: Arc<dyn UrlOpener>,
+    clipboard: Arc<dyn Clipboard>,
     summarizer: Summarizer,
     pub summary_overlay: SummaryOverlay,
     pub article_overlay: ArticleOverlay,
@@ -272,6 +276,7 @@ impl App {
             article_fetcher,
             articles: ArticleStore::new(ARTICLE_CACHE_CAP),
             url_opener: Arc::new(SystemUrlOpener),
+            clipboard: Arc::new(SystemClipboard),
             summarizer,
             summary_overlay: SummaryOverlay::default(),
             article_overlay: ArticleOverlay::default(),
@@ -305,6 +310,24 @@ impl App {
     pub(crate) fn with_url_opener(mut self, url_opener: Arc<dyn UrlOpener>) -> Self {
         self.url_opener = url_opener;
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_clipboard(mut self, clipboard: Arc<dyn Clipboard>) -> Self {
+        self.clipboard = clipboard;
+        self
+    }
+
+    /// Put text on the clipboard, reporting a failure the way every copy does.
+    /// Returns whether it landed, so callers can flash only on success.
+    pub(crate) fn copy_to_clipboard(&mut self, text: &str) -> bool {
+        match self.clipboard.copy(text) {
+            Ok(()) => true,
+            Err(error) => {
+                self.last_error = Some(format!("clipboard: {error:#}"));
+                false
+            }
+        }
     }
 
     pub fn spinner_frame(&self) -> char {

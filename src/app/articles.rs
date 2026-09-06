@@ -145,16 +145,25 @@ impl App {
             }
             ArticleAction::GoTop => self.article_overlay.go_top(),
             ArticleAction::GoBottom => self.article_overlay.go_bottom(),
-            ArticleAction::Copy => {
-                if let Err(error) = self.article_overlay.copy_article() {
-                    self.last_error = Some(format!("clipboard: {error:#}"));
-                }
-            }
+            ArticleAction::Copy => self.copy_article(),
             ArticleAction::OpenBrowser => self.open_article_source_in_browser(),
             ArticleAction::SelectNextLink => self.article_overlay.select_next_link(),
             ArticleAction::SelectPreviousLink => self.article_overlay.select_previous_link(),
             ArticleAction::OpenSelectedLink => self.open_selected_article_link(),
             ArticleAction::OpenHelp => self.help_overlay.open(),
+        }
+    }
+
+    fn copy_article(&mut self) {
+        let text = match self.article_overlay.copyable_text() {
+            Ok(text) => text,
+            Err(error) => {
+                self.last_error = Some(format!("clipboard: {error:#}"));
+                return;
+            }
+        };
+        if self.copy_to_clipboard(&text) {
+            self.article_overlay.mark_copied();
         }
     }
 

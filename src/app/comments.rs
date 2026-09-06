@@ -9,7 +9,7 @@ use crate::article::Article;
 use crate::config::default_include_article;
 use crate::summarizer::SummaryInput;
 use crate::ui::theme;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::time::Instant;
 
 impl App {
@@ -213,13 +213,8 @@ impl App {
         let plain = crate::text::hn_html_to_plain(&comment.text);
         let by = comment.by.as_deref().unwrap_or("[unknown]");
         let text = format!("{by}: {plain}");
-        match copy_to_clipboard(text) {
-            Ok(()) => {
-                self.copied_flash = Some(Instant::now());
-            }
-            Err(e) => {
-                self.last_error = Some(format!("clipboard: {e}"));
-            }
+        if self.copy_to_clipboard(&text) {
+            self.copied_flash = Some(Instant::now());
         }
     }
 
@@ -469,16 +464,4 @@ impl App {
             |task, event| AppEvent::Summary { task, event },
         );
     }
-}
-
-#[cfg(not(target_os = "android"))]
-fn copy_to_clipboard(text: String) -> Result<()> {
-    arboard::Clipboard::new()
-        .and_then(|mut cb| cb.set_text(text))
-        .context("copy to clipboard")
-}
-
-#[cfg(target_os = "android")]
-fn copy_to_clipboard(_text: String) -> Result<()> {
-    anyhow::bail!("clipboard unavailable on Android")
 }

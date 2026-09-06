@@ -2,7 +2,6 @@ use crate::api::types::Story;
 use crate::article::Article;
 use crate::ui::{clamped_scroll::ClampedScroll, markdown, overlay, theme};
 #[cfg(not(target_os = "android"))]
-use anyhow::Context;
 use anyhow::Result;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -304,20 +303,14 @@ impl ArticleOverlay {
         Paragraph::new(self.content_lines(spinner)).wrap(Wrap { trim: false })
     }
 
-    #[cfg(not(target_os = "android"))]
-    pub fn copy_article(&mut self) -> Result<()> {
+    /// The document `c` copies, or why there is nothing to copy.
+    pub(crate) fn copyable_text(&self) -> Result<String> {
         anyhow::ensure!(!self.content.is_empty(), "article is empty");
-        let mut clipboard = arboard::Clipboard::new().context("open clipboard")?;
-        clipboard
-            .set_text(self.copy_text())
-            .context("copy article")?;
-        self.copied_flash = Some(Instant::now());
-        Ok(())
+        Ok(self.copy_text())
     }
 
-    #[cfg(target_os = "android")]
-    pub fn copy_article(&mut self) -> Result<()> {
-        anyhow::bail!("clipboard unavailable on Android")
+    pub(crate) fn mark_copied(&mut self) {
+        self.copied_flash = Some(Instant::now());
     }
 }
 

@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod article;
 mod browser;
+mod clipboard;
 mod config;
 mod editor;
 mod input;

@@ -71,11 +71,7 @@ impl App {
                     }
                     SummaryAction::GoTop => self.summary_overlay.go_top(),
                     SummaryAction::GoBottom => self.summary_overlay.go_bottom(),
-                    SummaryAction::Copy => {
-                        if let Err(error) = self.summary_overlay.copy_summary() {
-                            self.last_error = Some(format!("clipboard: {error:#}"));
-                        }
-                    }
+                    SummaryAction::Copy => self.copy_summary(),
                     SummaryAction::OpenHelp => self.help_overlay.open(),
                 }
                 return;
@@ -285,6 +281,19 @@ impl App {
             (_, Action::EditConfig) => self.request_editor(),
 
             (_, _) => {}
+        }
+    }
+
+    fn copy_summary(&mut self) {
+        let text = match self.summary_overlay.copyable_text() {
+            Ok(text) => text,
+            Err(error) => {
+                self.last_error = Some(format!("clipboard: {error:#}"));
+                return;
+            }
+        };
+        if self.copy_to_clipboard(&text) {
+            self.summary_overlay.mark_copied();
         }
     }
 

@@ -1,8 +1,6 @@
 use crate::api::types::Story;
 use crate::summarizer::{SummaryEvent, SummaryStats};
 use crate::ui::{clamped_scroll::ClampedScroll, markdown, overlay, theme};
-#[cfg(not(target_os = "android"))]
-use anyhow::Context;
 use anyhow::Result;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -351,20 +349,14 @@ impl SummaryOverlay {
         Paragraph::new(self.content_lines(spinner)).wrap(Wrap { trim: false })
     }
 
-    #[cfg(not(target_os = "android"))]
-    pub fn copy_summary(&mut self) -> Result<()> {
+    /// The document `c` copies, or why there is nothing to copy.
+    pub(crate) fn copyable_text(&self) -> Result<String> {
         anyhow::ensure!(!self.summary.is_empty(), "summary is empty");
-        let mut clipboard = arboard::Clipboard::new().context("open clipboard")?;
-        clipboard
-            .set_text(self.copy_text())
-            .context("copy summary")?;
-        self.copied_flash = Some(Instant::now());
-        Ok(())
+        Ok(self.copy_text())
     }
 
-    #[cfg(target_os = "android")]
-    pub fn copy_summary(&mut self) -> Result<()> {
-        anyhow::bail!("clipboard unavailable on Android")
+    pub(crate) fn mark_copied(&mut self) {
+        self.copied_flash = Some(Instant::now());
     }
 }
 
