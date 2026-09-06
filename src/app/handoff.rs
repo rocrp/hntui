@@ -1,8 +1,10 @@
 use super::{App, AppEvent, TaskTarget, View};
 use crate::api::Story;
+use crate::config::{default_max_article_chars, default_max_comments};
 use crate::handoff::{
     instruction_line, paste_filename, HandoffDocument, HandoffStatus, HandoffSummary, PasteRequest,
 };
+use crate::summarizer::{comments_as_thread, truncated_article};
 use crate::ui::summary_overlay::SummaryState;
 
 impl App {
@@ -25,6 +27,10 @@ impl App {
             self.refuse_handoff("no story selected");
             return;
         };
+        if self.tasks.is_running(TaskTarget::Article(story.id)) {
+            self.refuse_handoff("article still fetching");
+            return;
+        }
         let document = self.handoff_document(&story);
         if document.is_empty() {
             self.refuse_handoff("nothing loaded to hand off");
@@ -88,12 +94,46 @@ impl App {
         self.stories.iter().find(|story| story.id == id).cloned()
     }
 
-    /// Everything loaded for this Story, and nothing else.
+    /// Everything loaded for this Story, and nothing else. The Article and the
+    /// Comments are cut exactly where the Summarizer cuts them, so a Handoff
+    /// that carries a Summary carries the material that Summary was made from.
     fn handoff_document(&self, story: &Story) -> HandoffDocument {
         HandoffDocument {
             summary: self.handoff_summary(story),
-            ..Default::default()
+            article: self.handoff_article(story),
+            comments: self.handoff_comments(story),
         }
+    }
+
+    /// An Article that is loaded goes in whether or not `include_article` is
+    /// on: the toggle governs the prompt, while a Handoff carries what is
+    /// loaded — and the user asked for this one with `v`.
+    fn handoff_article(&self, story: &Story) -> Option<String> {
+        let article = self.articles.get(story.id)?;
+        let max_chars = self
+            .config
+            .summarize()
+            .map_or_else(default_max_article_chars, |summarize| {
+                summarize.max_article_chars
+            });
+        let truncated = truncated_article(&article.content, max_chars);
+        (!truncated.trim().is_empty()).then_some(truncated)
+    }
+
+    fn handoff_comments(&self, story: &Story) -> Option<String> {
+        if self
+            .current_story
+            .as_ref()
+            .is_none_or(|current| current.id != story.id)
+        {
+            return None;
+        }
+        let max_comments = self
+            .config
+            .summarize()
+            .map_or_else(default_max_comments, |summarize| summarize.max_comments);
+        let thread = comments_as_thread(&self.comment_list, max_comments);
+        (!thread.trim().is_empty()).then_some(thread)
     }
 
     fn handoff_summary(&self, story: &Story) -> Option<HandoffSummary> {

@@ -191,6 +191,10 @@ impl RecordingPasteService {
         }
     }
 
+    pub(crate) fn last_content(&self) -> Option<String> {
+        self.requests().last().map(|(_, content)| content.clone())
+    }
+
     /// The (filename, content) pairs this service was asked to publish.
     pub(crate) fn requests(&self) -> Vec<(String, String)> {
         self.requests
