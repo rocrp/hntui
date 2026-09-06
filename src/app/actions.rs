@@ -29,8 +29,16 @@ impl App {
         self.last_user_activity = Instant::now();
         if !matches!(action, Action::Noop) {
             // The reload line has been on screen for at least a frame; the user
-            // moving on is the signal that they have read it.
+            // moving on is the signal that they have read it. A Handoff still
+            // in flight keeps reporting; only a settled one is cleared.
             self.config_status = None;
+            if self
+                .handoff_status
+                .as_ref()
+                .is_some_and(crate::handoff::HandoffStatus::is_settled)
+            {
+                self.handoff_status = None;
+            }
         }
         match action {
             Action::Noop => return,
@@ -277,6 +285,8 @@ impl App {
                     self.open_article_overlay(&story);
                 }
             }
+
+            (_, Action::Handoff) => self.start_handoff(),
 
             (_, Action::EditConfig) => self.request_editor(),
 

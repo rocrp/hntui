@@ -314,7 +314,12 @@ impl ArticleOverlay {
     }
 }
 
-pub fn render(frame: &mut Frame, overlay: &ArticleOverlay, spinner: char) {
+pub fn render(
+    frame: &mut Frame,
+    overlay: &ArticleOverlay,
+    spinner: char,
+    handoff: Option<&crate::handoff::HandoffStatus>,
+) {
     if !overlay.is_visible() {
         return;
     }
@@ -347,7 +352,9 @@ pub fn render(frame: &mut Frame, overlay: &ArticleOverlay, spinner: char) {
     );
     overlay::render_scrollbar(frame, areas.scrollbar, &overlay.scroll);
 
-    let hint = if overlay::copied_recently(overlay.copied_flash) {
+    let hint = if let Some(status) = handoff {
+        crate::ui::handoff_status_line(status)
+    } else if overlay::copied_recently(overlay.copied_flash) {
         Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else {
         let text = if let Some(url) = overlay.selected_link() {
@@ -357,7 +364,9 @@ pub fn render(frame: &mut Frame, overlay: &ArticleOverlay, spinner: char) {
                 ArticleState::Done if !overlay.links.is_empty() => {
                     "j/k: scroll  Tab/Shift+Tab: links  Enter: open  c: copy  o: original  q/Esc: close"
                 }
-                ArticleState::Done => "j/k: scroll  c: copy  o: original  q/Esc: close",
+                ArticleState::Done => {
+                    "j/k: scroll  c: copy  H: hand off  o: original  q/Esc: close"
+                }
                 ArticleState::Error => "o: original  q/Esc: close",
                 _ => "q/Esc: cancel",
             }

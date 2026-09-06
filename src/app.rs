@@ -3,6 +3,7 @@ use crate::article::{Article, ArticleFetcher};
 use crate::browser::{SystemUrlOpener, UrlOpener};
 use crate::clipboard::{Clipboard, SystemClipboard};
 use crate::config::Config;
+use crate::handoff::{HandoffStatus, JakePasteService, Paste, PasteService};
 use crate::input::KeyState;
 use crate::logging;
 use crate::state::StateStore;
@@ -29,6 +30,9 @@ mod comments;
 mod config_edit;
 mod connection_test;
 mod events;
+mod handoff;
+#[cfg(test)]
+mod handoff_tests;
 #[cfg(test)]
 mod help_tests;
 mod list_nav;
@@ -87,6 +91,10 @@ pub enum AppEvent {
         task: TaskId,
         story_id: u64,
         article: Article,
+    },
+    HandoffCreated {
+        task: TaskId,
+        paste: Paste,
     },
     ArticleUnavailable {
         task: TaskId,
@@ -190,6 +198,10 @@ pub struct App {
     articles: ArticleStore,
     url_opener: Arc<dyn UrlOpener>,
     clipboard: Arc<dyn Clipboard>,
+    paste_service: Arc<dyn PasteService>,
+    /// What the last Handoff is doing, shown in the footer of whatever layer
+    /// is up. Outlives the overlay it was started from.
+    pub handoff_status: Option<HandoffStatus>,
     summarizer: Summarizer,
     pub summary_overlay: SummaryOverlay,
     pub article_overlay: ArticleOverlay,
@@ -277,6 +289,8 @@ impl App {
             articles: ArticleStore::new(ARTICLE_CACHE_CAP),
             url_opener: Arc::new(SystemUrlOpener),
             clipboard: Arc::new(SystemClipboard),
+            paste_service: Arc::new(JakePasteService::new(reqwest::Client::new())),
+            handoff_status: None,
             summarizer,
             summary_overlay: SummaryOverlay::default(),
             article_overlay: ArticleOverlay::default(),
@@ -315,6 +329,11 @@ impl App {
     #[cfg(test)]
     pub(crate) fn with_clipboard(mut self, clipboard: Arc<dyn Clipboard>) -> Self {
         self.clipboard = clipboard;
+        self
+    }
+
+    pub(crate) fn with_paste_service(mut self, paste_service: Arc<dyn PasteService>) -> Self {
+        self.paste_service = paste_service;
         self
     }
 

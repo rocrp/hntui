@@ -110,6 +110,9 @@ pub enum Action {
     Collapse,
     Expand,
     ToggleCollapse,
+    /// Hand the Story off to another agent. Reachable from every layer that
+    /// shows one, so it is a top-level Action rather than a per-layer one.
+    Handoff,
     Refresh,
     Summarize,
     ViewArticle,
@@ -201,6 +204,7 @@ impl KeyState {
             (KeyCode::Char('G'), KeyModifiers::SHIFT)
             | (KeyCode::Char('G'), KeyModifiers::NONE) => Action::Summary(SummaryAction::GoBottom),
             (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Summary(SummaryAction::Copy),
+            (KeyCode::Char('H'), _) => Action::Handoff,
             _ => Action::Noop,
         }
     }
@@ -234,6 +238,7 @@ impl KeyState {
             (KeyCode::Char('G'), KeyModifiers::SHIFT)
             | (KeyCode::Char('G'), KeyModifiers::NONE) => Action::Article(ArticleAction::GoBottom),
             (KeyCode::Char('c'), KeyModifiers::NONE) => Action::Article(ArticleAction::Copy),
+            (KeyCode::Char('H'), _) => Action::Handoff,
             (KeyCode::Char('o'), KeyModifiers::NONE) => Action::Article(ArticleAction::OpenBrowser),
             (KeyCode::BackTab, _) | (KeyCode::Tab, KeyModifiers::SHIFT) => {
                 Action::Article(ArticleAction::SelectPreviousLink)
@@ -277,6 +282,7 @@ impl KeyState {
             (KeyCode::Char('F'), KeyModifiers::SHIFT)
             | (KeyCode::Char('F'), KeyModifiers::NONE) => Action::OpenFilter,
             (KeyCode::Char('y'), KeyModifiers::NONE) => Action::CopyComment,
+            (KeyCode::Char('H'), _) => Action::Handoff,
             (KeyCode::Char(','), KeyModifiers::NONE) => Action::EditConfig,
             _ => Action::Noop,
         }

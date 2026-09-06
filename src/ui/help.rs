@@ -133,6 +133,8 @@ fn content_lines(active: View, focus: HelpFocus) -> Vec<Line<'static>> {
 
     lines.push(section_title("Summary", focus == HelpFocus::Summary));
     lines.push(kv("gg, G", "top / bottom"));
+    lines.push(kv("c", "copy summary to clipboard"));
+    lines.push(kv("H", "hand off to another agent (paste link)"));
     lines.push(Line::raw(""));
 
     lines.push(section_title("Article", focus == HelpFocus::Article));

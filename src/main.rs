@@ -5,6 +5,7 @@ mod browser;
 mod clipboard;
 mod config;
 mod editor;
+mod handoff;
 mod input;
 mod logging;
 mod state;

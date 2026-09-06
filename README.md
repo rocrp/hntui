@@ -58,6 +58,17 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `,` | Edit config (`$EDITOR`) |
 | `q`, `Esc` | Back |
 
+**Summary** (`s`)
+
+| Key | Action |
+|-----|--------|
+| `j/k`, `↓/↑` | Scroll |
+| `gg` / `G` | Top / bottom |
+| `Ctrl+d/u` | Page down / up |
+| `c` | Copy summary to clipboard |
+| `H` | Hand off to another agent |
+| `q`, `Esc` | Close (cancels a running summary) |
+
 **Article** (`v`)
 
 | Key | Action |
@@ -72,6 +83,22 @@ curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh
 | `q`, `Esc` | Close (cancels a running fetch) |
 
 The selected link target appears in the footer before opening.
+
+### Handing off to another agent
+
+`H` packages what hntui has already shown for a story — its links and metadata,
+the AI summary, the article text, the discussion — as one Markdown document,
+publishes it as a private paste that expires after a week, and puts a single
+line on the clipboard:
+
+```
+Read the HN thread handoff at https://paste.dzzu.net/raw/<id>?token=<token> (story, article, comments, AI summary), then help me with: 
+```
+
+Paste that into any agent and type the question after it. A handoff never
+fetches: it carries what is loaded, so it is refused while a summary is still
+streaming or an article is still being fetched. The footer reports the paste URL
+whether or not the clipboard accepted the line.
 
 **Touch / Mouse** (Termux, etc.)
 

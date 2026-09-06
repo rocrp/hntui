@@ -253,6 +253,15 @@ impl SummaryOverlay {
 
     /// How the model reads in the title: `requested → resolved` when a proxy or
     /// alias resolved it to something else, the requested spec alone otherwise.
+    pub(crate) fn story_id(&self) -> u64 {
+        self.story_id
+    }
+
+    /// The summary markdown as the model produced it.
+    pub(crate) fn summary_text(&self) -> &str {
+        &self.summary
+    }
+
     pub(crate) fn model_label(&self) -> String {
         match &self.resolved_model {
             Some(resolved) => format!("{} → {resolved}", self.model_name),
@@ -377,7 +386,12 @@ fn format_tokens(tokens: usize) -> String {
     format!("{:.1}k", tokens as f64 / 1_000.0)
 }
 
-pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
+pub fn render(
+    frame: &mut Frame,
+    overlay: &SummaryOverlay,
+    spinner: char,
+    handoff: Option<&crate::handoff::HandoffStatus>,
+) {
     if !overlay.is_visible() {
         return;
     }
@@ -417,11 +431,13 @@ pub fn render(frame: &mut Frame, overlay: &SummaryOverlay, spinner: char) {
     );
     overlay::render_scrollbar(frame, areas.scrollbar, &overlay.scroll);
 
-    let hint = if overlay::copied_recently(overlay.copied_flash) {
+    let hint = if let Some(status) = handoff {
+        crate::ui::handoff_status_line(status)
+    } else if overlay::copied_recently(overlay.copied_flash) {
         Line::from(Span::styled("Copied!", theme::SUCCESS))
     } else {
         let text = match overlay.state {
-            SummaryState::Done => "j/k: scroll  c: copy  q/Esc: close",
+            SummaryState::Done => "j/k: scroll  c: copy  H: hand off  q/Esc: close",
             SummaryState::Streaming => "j/k: scroll  c: copy  q/Esc: cancel",
             SummaryState::Error => "j/k: scroll  q/Esc: close",
             _ => "q/Esc: cancel",

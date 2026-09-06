@@ -64,6 +64,8 @@ pub fn render(frame: &mut Frame, app: &App) {
             format!("Error: {}", format_error(err)),
             theme::ERROR,
         )])
+    } else if let Some(status) = app.handoff_status.as_ref() {
+        super::handoff_status_line(status)
     } else if let Some(status) = app.config_status.as_ref() {
         super::config_status_line(status)
     } else if let Some(story) = app.current_story.as_ref() {

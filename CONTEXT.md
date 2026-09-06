@@ -66,6 +66,14 @@ _Avoid_: settings popup, form
 Re-reading the config file after the Editor returns and applying it to the running app; a file that fails to parse or validate leaves the previous config in force.
 _Avoid_: restart, refresh
 
+**Handoff**:
+Packaging what hntui has already shown for one Story — its links and metadata, its Summary, its Article, its Comments — so another agent can continue where the user left off. A Handoff never fetches; it carries only what is loaded.
+_Avoid_: export, share, copy (a Copy puts one view's content on the clipboard; a Handoff carries the whole Story context)
+
+**Paste**:
+The hosted copy of a Handoff on the paste service, addressed by its raw URL; private and short-lived.
+_Avoid_: upload, share link, gist
+
 ### Modules
 
 **CommentLayout**:

@@ -76,6 +76,15 @@ impl App {
             AppEvent::TaskCompleted { task } => {
                 self.tasks.finish(task);
             }
+            AppEvent::HandoffCreated { task, paste } => {
+                // A Handoff is never superseded — a second one is refused while
+                // this is in flight — so this result is always the current one.
+                if !self.tasks.finish(task) {
+                    return;
+                }
+                assert_eq!(task.target(), TaskTarget::Handoff);
+                self.finish_handoff(paste.raw_url);
+            }
             AppEvent::TaskFailed { task, message } => {
                 self.handle_task_failure(task, message);
             }
@@ -205,6 +214,9 @@ impl App {
             TaskTarget::Summary => self.summary_overlay.fail(message),
             TaskTarget::ConnectionTest => {
                 unreachable!("ConnectionTest reports typed result events: {message}")
+            }
+            TaskTarget::Handoff => {
+                self.handoff_status = Some(crate::handoff::HandoffStatus::Failed(message));
             }
             TaskTarget::StoryStateSave => {
                 logging::log_error(format!("failed to save story state: {message}"));

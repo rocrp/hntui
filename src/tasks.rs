@@ -17,6 +17,7 @@ pub(crate) enum TaskTarget {
     Summary,
     ConnectionTest,
     StoryStateSave,
+    Handoff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

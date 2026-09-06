@@ -58,7 +58,11 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
     )?;
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
     let search = SearchClient::new(http.clone(), "https://hn.algolia.com/api/v1/search")?;
-    let summarizer = Summarizer::new(config.summarize().cloned(), config.api_key_override(), http);
+    let summarizer = Summarizer::new(
+        config.summarize().cloned(),
+        config.api_key_override(),
+        http.clone(),
+    );
     // localwebrs writes a CWD-relative `cache/cache.sqlite`, so it must run
     // from our cache dir or it litters the user's working directory. The dir
     // has to exist up front: a missing `current_dir` fails the spawn with the
@@ -77,7 +81,10 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
         config,
         summarizer,
         article_fetcher,
-    );
+    )
+    .with_paste_service(Arc::new(crate::handoff::JakePasteService::new(
+        http.clone(),
+    )));
 
     if let Some(store) = &state_store {
         if let Some(state) = store.load_story_list_state().await? {

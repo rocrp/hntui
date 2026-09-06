@@ -50,7 +50,7 @@ fn render_overlay(
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("create test terminal");
     terminal
-        .draw(|frame| render(frame, overlay, '⠋'))
+        .draw(|frame| render(frame, overlay, '⠋', None))
         .expect("render article overlay");
 
     (terminal.backend().buffer().clone(), areas)

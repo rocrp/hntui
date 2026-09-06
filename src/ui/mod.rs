@@ -54,13 +54,50 @@ pub fn render(frame: &mut Frame, app: &App) {
     match layer {
         InputLayer::Help => help::render(frame, app),
         InputLayer::Summary => {
-            summary_overlay::render(frame, &app.summary_overlay, app.spinner_frame());
+            summary_overlay::render(
+                frame,
+                &app.summary_overlay,
+                app.spinner_frame(),
+                app.handoff_status.as_ref(),
+            );
         }
         InputLayer::Article => {
-            article_overlay::render(frame, &app.article_overlay, app.spinner_frame());
+            article_overlay::render(
+                frame,
+                &app.article_overlay,
+                app.spinner_frame(),
+                app.handoff_status.as_ref(),
+            );
         }
         InputLayer::FeedFilter => feed_filter::render(frame, app),
         InputLayer::FilterText | InputLayer::SearchText | InputLayer::View => {}
+    }
+}
+
+/// How a Handoff reports itself. The raw URL is the deliverable, so it is on
+/// the line whenever it exists — even when the clipboard would not take it.
+pub(crate) fn handoff_status_line(
+    status: &crate::handoff::HandoffStatus,
+) -> ratatui::text::Line<'static> {
+    use crate::handoff::HandoffStatus;
+    use ratatui::text::{Line, Span};
+
+    match status {
+        HandoffStatus::InFlight => Line::from(Span::styled("handing off…", theme::HINT)),
+        HandoffStatus::Done {
+            raw_url,
+            clipboard_error,
+        } => {
+            let head = Span::styled(format!("handoff → {raw_url}"), theme::SUCCESS);
+            let tail = match clipboard_error {
+                None => Span::styled(" · copied", theme::HINT),
+                Some(error) => Span::styled(format!(" · clipboard: {error}"), theme::ERROR),
+            };
+            Line::from(vec![head, tail])
+        }
+        HandoffStatus::Failed(message) => {
+            Line::from(Span::styled(format!("handoff: {message}"), theme::ERROR))
+        }
     }
 }
 
