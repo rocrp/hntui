@@ -1,6 +1,5 @@
 use crate::api::types::{Comment, Story};
 use crate::config::SummarizeConfig;
-use crate::text::hn_html_to_plain;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
@@ -11,8 +10,10 @@ mod connection;
 #[cfg(test)]
 mod connection_tests;
 mod friendly_error;
+pub(crate) mod material;
 pub(crate) use connection::{ConnectionDraft, ConnectionTestError, ConnectionTestSuccess};
 pub(crate) use friendly_error::friendly_llm_error;
+pub(crate) use material::{comments_as_thread, truncated_article};
 
 pub(crate) type LlmResult<T> = std::result::Result<T, smolllm::Error>;
 pub(crate) type LlmFuture = BoxFuture<'static, LlmResult<LlmSession>>;
@@ -312,7 +313,7 @@ fn build_prompt(
 
     if let Some(article) = article {
         prompt.push_str("## Article\n\n");
-        prompt.push_str(&truncate_article(article, max_article_chars));
+        prompt.push_str(&truncated_article(article, max_article_chars));
         prompt.push_str("\n\n");
     }
 
@@ -325,22 +326,8 @@ fn build_prompt(
     if article.is_some() {
         prompt.push_str("## Comments\n\n");
     }
-    for comment in comments.iter().take(max_comments) {
-        let author = comment.by.as_deref().unwrap_or("[anon]");
-        let indent = "  ".repeat(comment.depth);
-        let text = hn_html_to_plain(&comment.text);
-        prompt.push_str(&format!("{indent}{author}: {text}\n\n"));
-    }
+    prompt.push_str(&comments_as_thread(comments, max_comments));
     prompt
-}
-
-/// Head-truncate on a char boundary; the lead of an article carries the thesis.
-fn truncate_article(article: &str, max_chars: usize) -> String {
-    let mut truncated: String = article.chars().take(max_chars).collect();
-    if truncated.chars().count() < article.chars().count() {
-        truncated.push_str("\n\n…[truncated]");
-    }
-    truncated
 }
 
 #[cfg(test)]

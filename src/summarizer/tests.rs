@@ -143,7 +143,7 @@ fn an_article_longer_than_the_cap_is_head_truncated_with_a_marker() {
 
 #[test]
 fn truncation_counts_characters_not_bytes() {
-    let truncated = truncate_article("世界你好世界", 3);
+    let truncated = truncated_article("世界你好世界", 3);
     assert!(truncated.starts_with("世界你"));
     assert!(truncated.ends_with("…[truncated]"));
 }
