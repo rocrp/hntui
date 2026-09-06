@@ -57,6 +57,7 @@ impl PasteService for JakePasteService {
         Box::pin(async move {
             let response = http
                 .post(PASTE_API)
+                .timeout(std::time::Duration::from_secs(30))
                 .json(&serde_json::json!({
                     "content": request.content,
                     "format": "markdown",
@@ -89,7 +90,16 @@ impl PasteService for JakePasteService {
 pub(crate) struct HandoffDocument {
     pub summary: Option<HandoffSummary>,
     pub article: Option<String>,
-    pub comments: Option<String>,
+    pub comments: Option<HandoffComments>,
+}
+
+/// The discussion as it goes into the document, with the count that describes
+/// it. They travel together so the front matter cannot claim a number the
+/// Comments section does not back up.
+#[derive(Debug)]
+pub(crate) struct HandoffComments {
+    pub text: String,
+    pub count: usize,
 }
 
 #[derive(Debug)]
@@ -115,7 +125,14 @@ impl HandoffDocument {
         out.push_str(&format!("hn: {}\n", crate::ui::overlay::hn_url(story.id)));
         out.push_str(&format!("score: {}\n", story.score));
         out.push_str(&format!("author: {}\n", story.by));
-        out.push_str(&format!("comments: {}\n", story.comment_count));
+        // What this document carries, not what the thread holds — an agent that
+        // reads `comments: 312` and finds 87 of them reasons about a discussion
+        // it was never given. The thread's own total is named separately.
+        let carried = self.comments.as_ref().map_or(0, |comments| comments.count);
+        out.push_str(&format!("comments: {carried}\n"));
+        if story.comment_count as usize != carried {
+            out.push_str(&format!("comments_total: {}\n", story.comment_count));
+        }
         if let Some(summary) = &self.summary {
             out.push_str(&format!("model: {}\n", summary.model));
         }
@@ -134,7 +151,7 @@ impl HandoffDocument {
         }
         if let Some(comments) = &self.comments {
             out.push_str("\n## Comments\n\n");
-            out.push_str(comments.trim_end());
+            out.push_str(comments.text.trim_end());
             out.push('\n');
         }
         out

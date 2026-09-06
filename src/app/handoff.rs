@@ -2,7 +2,8 @@ use super::{App, AppEvent, TaskTarget, View};
 use crate::api::Story;
 use crate::config::{default_max_article_chars, default_max_comments};
 use crate::handoff::{
-    instruction_line, paste_filename, HandoffDocument, HandoffStatus, HandoffSummary, PasteRequest,
+    instruction_line, paste_filename, HandoffComments, HandoffDocument, HandoffStatus,
+    HandoffSummary, PasteRequest,
 };
 use crate::summarizer::{comments_as_thread, truncated_article};
 use crate::ui::summary_overlay::SummaryState;
@@ -107,9 +108,18 @@ impl App {
 
     /// An Article that is loaded goes in whether or not `include_article` is
     /// on: the toggle governs the prompt, while a Handoff carries what is
-    /// loaded — and the user asked for this one with `v`.
+    /// loaded — and the user asked for this one with `v`. A self-post's body is
+    /// loaded the moment its Story is, so an Ask HN is never handed over as
+    /// replies to a question the agent cannot see.
     fn handoff_article(&self, story: &Story) -> Option<String> {
-        let article = self.articles.get(story.id)?;
+        let local;
+        let article = match self.articles.get(story.id) {
+            Some(article) => article,
+            None => {
+                local = self.local_article(story)?;
+                &local
+            }
+        };
         let max_chars = self
             .config
             .summarize()
@@ -120,7 +130,7 @@ impl App {
         (!truncated.trim().is_empty()).then_some(truncated)
     }
 
-    fn handoff_comments(&self, story: &Story) -> Option<String> {
+    fn handoff_comments(&self, story: &Story) -> Option<HandoffComments> {
         if self
             .current_story
             .as_ref()
@@ -132,8 +142,14 @@ impl App {
             .config
             .summarize()
             .map_or_else(default_max_comments, |summarize| summarize.max_comments);
-        let thread = comments_as_thread(&self.comment_list, max_comments);
-        (!thread.trim().is_empty()).then_some(thread)
+        let text = comments_as_thread(&self.comment_list, max_comments);
+        if text.trim().is_empty() {
+            return None;
+        }
+        Some(HandoffComments {
+            count: self.comment_list.len().min(max_comments),
+            text,
+        })
     }
 
     fn handoff_summary(&self, story: &Story) -> Option<HandoffSummary> {

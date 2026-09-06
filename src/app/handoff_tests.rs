@@ -549,3 +549,34 @@ async fn the_handoff_line_is_not_hidden_by_an_error_from_earlier() {
     );
     assert!(!rendered.contains("something failed earlier"), "{rendered}");
 }
+
+#[tokio::test]
+async fn an_ask_hn_carries_the_question_its_replies_answer() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes.clone());
+    let mut item = story(42);
+    item.url = None;
+    item.text = Some("<p>How do you test TUIs?".to_string());
+    with_comments(&mut harness.app, &item, vec![comment(11)]);
+
+    harness.hand_off().await;
+
+    let content = pastes.last_content().expect("a paste was created");
+    assert!(content.contains("How do you test TUIs?"), "{content}");
+    assert!(content.contains("## Comments"), "{content}");
+}
+
+#[tokio::test]
+async fn the_front_matter_never_claims_more_comments_than_it_carries() {
+    let pastes = Arc::new(RecordingPasteService::default());
+    let mut harness = Harness::new(pastes.clone());
+    let mut item = story(42);
+    item.comment_count = 312;
+    with_comments(&mut harness.app, &item, vec![comment(11), comment(12)]);
+
+    harness.hand_off().await;
+
+    let content = pastes.last_content().expect("a paste was created");
+    assert!(content.contains("comments: 2\n"), "{content}");
+    assert!(content.contains("comments_total: 312\n"), "{content}");
+}

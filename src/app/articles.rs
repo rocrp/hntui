@@ -42,7 +42,7 @@ impl App {
 
     /// The Article we can produce without asking anyone: a self-post body,
     /// from the Story itself or from a discussion we already prefetched.
-    fn local_article(&self, story: &Story) -> Option<Article> {
+    pub(super) fn local_article(&self, story: &Story) -> Option<Article> {
         if story.url.is_some() {
             return None;
         }

@@ -1,7 +1,6 @@
 use crate::api::types::Story;
 use crate::article::Article;
 use crate::ui::{clamped_scroll::ClampedScroll, markdown, overlay, theme};
-#[cfg(not(target_os = "android"))]
 use anyhow::Result;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};

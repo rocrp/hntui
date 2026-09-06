@@ -1,5 +1,12 @@
 use super::*;
 
+fn comments(text: &str, count: usize) -> HandoffComments {
+    HandoffComments {
+        text: text.to_string(),
+        count,
+    }
+}
+
 fn story() -> Story {
     Story {
         id: 42,
@@ -32,7 +39,8 @@ fn a_summary_only_document_pairs_front_matter_with_one_section() {
          hn: https://news.ycombinator.com/item?id=42\n\
          score: 99\n\
          author: alice\n\
-         comments: 7\n\
+         comments: 0\n\
+         comments_total: 7\n\
          model: fake/model\n\
          date: 2023-11-14\n\
          ---\n\
@@ -67,7 +75,7 @@ fn sections_appear_in_summary_article_comments_order() {
             model: "m".to_string(),
         }),
         article: Some("A".to_string()),
-        comments: Some("C".to_string()),
+        comments: Some(comments("C", 1)),
     };
 
     let rendered = document.render(&story());
@@ -81,7 +89,7 @@ fn sections_appear_in_summary_article_comments_order() {
 #[test]
 fn material_that_is_not_loaded_leaves_no_empty_heading() {
     let document = HandoffDocument {
-        comments: Some("bob: hi".to_string()),
+        comments: Some(comments("bob: hi", 1)),
         ..Default::default()
     };
 
@@ -97,7 +105,7 @@ fn a_story_without_a_link_carries_no_source_line() {
     let mut story = story();
     story.url = None;
     let document = HandoffDocument {
-        comments: Some("bob: hi".to_string()),
+        comments: Some(comments("bob: hi", 1)),
         ..Default::default()
     };
 
@@ -123,4 +131,32 @@ fn the_instruction_line_ends_open_for_the_users_question() {
 #[test]
 fn the_paste_is_named_after_the_story() {
     assert_eq!(paste_filename(42), "hn-42.md");
+}
+
+#[test]
+fn the_front_matter_counts_the_comments_the_document_carries() {
+    let document = HandoffDocument {
+        comments: Some(comments("bob: hi\n\ncarol: hi", 2)),
+        ..Default::default()
+    };
+
+    let rendered = document.render(&story());
+
+    // The thread holds 7; this document carries 2, and says so without hiding
+    // that there are more.
+    assert!(rendered.contains("comments: 2\n"), "{rendered}");
+    assert!(rendered.contains("comments_total: 7\n"), "{rendered}");
+}
+
+#[test]
+fn a_document_carrying_the_whole_thread_names_no_separate_total() {
+    let document = HandoffDocument {
+        comments: Some(comments("all seven", 7)),
+        ..Default::default()
+    };
+
+    let rendered = document.render(&story());
+
+    assert!(rendered.contains("comments: 7\n"), "{rendered}");
+    assert!(!rendered.contains("comments_total"), "{rendered}");
 }

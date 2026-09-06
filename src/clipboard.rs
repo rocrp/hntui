@@ -46,8 +46,19 @@ pub(crate) fn is_remote_session() -> bool {
         || env::var_os("SSH_CLIENT").is_some()
 }
 
+/// Terminals cap the OSC 52 string and drop anything longer without a word, so
+/// an oversized copy is refused rather than silently vanishing while the UI
+/// flashes "Copied!". Sized to clear any summary; a whole article is what the
+/// Handoff is for, and it moves the document without the terminal in the way.
+const MAX_OSC52_ENCODED: usize = 100_000;
+
 pub(crate) fn copy_via_osc52(text: &str) -> Result<()> {
     let encoded = STANDARD.encode(text);
+    anyhow::ensure!(
+        encoded.len() <= MAX_OSC52_ENCODED,
+        "{} KB is too large for a remote clipboard; hand it off with H instead",
+        text.len() / 1024
+    );
     let osc52 = format!("\x1b]52;c;{encoded}\x07");
     let payload = if env::var_os("TMUX").is_some() {
         // tmux DCS passthrough: \ePtmux;<inner with each ESC doubled>\e\\
@@ -61,6 +72,31 @@ pub(crate) fn copy_via_osc52(text: &str) -> Result<()> {
     stdout.write_all(payload.as_bytes())?;
     stdout.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_oversized_copy_is_refused_instead_of_silently_dropped() {
+        let huge = "x".repeat(200_000);
+
+        let error = copy_via_osc52(&huge).expect_err("a 200 KB copy cannot fit OSC 52");
+
+        assert_eq!(
+            error.to_string(),
+            "195 KB is too large for a remote clipboard; hand it off with H instead"
+        );
+    }
+
+    #[test]
+    fn a_summary_sized_copy_still_fits() {
+        // 60 KB of text is ~80 KB encoded: comfortably inside the cap.
+        let summary = "x".repeat(60_000);
+
+        assert!(STANDARD.encode(&summary).len() <= MAX_OSC52_ENCODED);
+    }
 }
 
 /// Records what was copied instead of touching a real clipboard, and can be
