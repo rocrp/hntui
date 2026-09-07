@@ -183,3 +183,42 @@ fn streaming_growth_shrinks_the_scrollbar_thumb() {
         "scrollbar thumb should shrink as streaming content grows"
     );
 }
+
+#[test]
+fn a_table_in_a_summary_renders_as_aligned_columns() {
+    let mut overlay = completed_overlay("| Feature | Status | Notes |\n|---|---|---|\n| Bold | done | ships |\n| Tables | wip | later |");
+
+    let (buffer, areas) = render_overlay(&mut overlay, 60, 12);
+    let rows: Vec<String> = (areas.content.top()..areas.content.bottom())
+        .map(|row| {
+            (areas.content.left()..areas.content.right())
+                .map(|column| buffer[(column, row)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+
+    assert_eq!(rows[0], "Feature  Status  Notes");
+    assert_eq!(rows[1], "───────  ──────  ─────");
+    assert_eq!(rows[2], "Bold     done    ships");
+    assert_eq!(rows[3], "Tables   wip     later");
+}
+
+#[test]
+fn a_wide_table_stays_inside_the_summary_content_area() {
+    let wide = "| Column one heading | Column two heading | Column three heading |\n\
+                |---|---|---|\n\
+                | a fairly long value | another long value | a third long value |";
+    let mut overlay = completed_overlay(wide);
+
+    let (buffer, areas) = render_overlay(&mut overlay, 44, 12);
+
+    // Nothing may spill into the gutter or scrollbar lane beside the content.
+    for row in areas.content.top()..areas.content.bottom() {
+        let beyond = (areas.content.right()..areas.popup.right().saturating_sub(1))
+            .map(|column| buffer[(column, row)].symbol().to_string())
+            .collect::<String>();
+        assert!(beyond.trim().is_empty(), "row {row} spilled: {beyond:?}");
+    }
+}

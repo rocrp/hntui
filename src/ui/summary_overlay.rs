@@ -312,15 +312,15 @@ impl SummaryOverlay {
                 reasoning_lines(&self.reasoning, spinner)
             }
             SummaryState::Streaming => {
-                let mut lines = markdown::render_markdown(&self.summary);
+                let mut lines = markdown::render_markdown(&self.summary, self.viewport_width);
                 lines.push(Line::from(Span::styled(spinner.to_string(), theme::HINT)));
                 lines
             }
-            SummaryState::Done => markdown::render_markdown(&self.summary),
+            SummaryState::Done => markdown::render_markdown(&self.summary, self.viewport_width),
             // Whatever streamed before the failure is still worth reading, so
             // it stays above the error rather than being thrown away with it.
             SummaryState::Error => {
-                let mut lines = markdown::render_markdown(&self.summary);
+                let mut lines = markdown::render_markdown(&self.summary, self.viewport_width);
                 if !lines.is_empty() {
                     lines.push(Line::raw(""));
                 }

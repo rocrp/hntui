@@ -83,6 +83,10 @@ The module that owns comment line geometry — which lines exist, which comment 
 The core that turns a story plus its comments into a stream of summary events via an LLM.
 _Avoid_: plugin (there is no plugin system; one adapter does not make a seam)
 
+**Summary**:
+The Markdown text the Summarizer produced for one Story, as the model wrote it.
+_Avoid_: result, response
+
 **SummaryOverlay**:
 The view that presents the Summarizer's output — scrolling, copying, streaming display.
 _Avoid_: plugin overlay

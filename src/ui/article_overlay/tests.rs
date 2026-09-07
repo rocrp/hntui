@@ -357,3 +357,36 @@ fn a_self_post_overlay_labels_its_source_as_self() {
 
     assert!(title.contains("(self)"), "unexpected title: {title:?}");
 }
+
+#[test]
+fn a_chinese_article_renders_emphasis_instead_of_asterisks() {
+    let mut overlay = done_overlay("**要点：**内容在这里");
+
+    let (buffer, areas) = render_overlay(&mut overlay, 40, 10);
+    // Wide characters leave a blank continuation cell behind each glyph, and
+    // the rest of the row is padding, so compare without the spaces.
+    let text = area_text(&buffer, areas.content).replace(' ', "");
+
+    assert!(text.starts_with("要点：内容在这里"), "got {text:?}");
+    assert!(!text.contains('*'), "got {text:?}");
+}
+
+#[test]
+fn a_table_in_an_article_renders_as_aligned_columns() {
+    let mut overlay = done_overlay("| Feature | Status |\n|---|---|\n| Bold | done |");
+
+    let (buffer, areas) = render_overlay(&mut overlay, 40, 10);
+    let rows: Vec<String> = (areas.content.top()..areas.content.bottom())
+        .map(|row| {
+            (areas.content.left()..areas.content.right())
+                .map(|column| buffer[(column, row)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+
+    assert_eq!(rows[0], "Feature  Status");
+    assert_eq!(rows[1], "───────  ──────");
+    assert_eq!(rows[2], "Bold     done");
+}

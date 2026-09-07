@@ -69,9 +69,13 @@ impl ArticleOverlay {
             .effective_url
             .or_else(|| self.story_url.clone())
             .or_else(|| Some(overlay::hn_url(self.story_id)));
-        self.links =
-            markdown::render_markdown_document(&self.content, self.link_base_url.as_deref(), None)
-                .links;
+        self.links = markdown::render_markdown_document(
+            &self.content,
+            self.link_base_url.as_deref(),
+            None,
+            self.viewport_width,
+        )
+        .links;
         self.selected_link = None;
         self.error = None;
         self.started_at = None;
@@ -287,6 +291,7 @@ impl ArticleOverlay {
                     &self.content,
                     self.link_base_url.as_deref(),
                     self.selected_link,
+                    self.viewport_width,
                 )
                 .lines
             }

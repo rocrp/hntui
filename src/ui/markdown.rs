@@ -1,5 +1,7 @@
 use std::ops::RangeInclusive;
 
+use crate::ui::markdown::cjk::{escape_cjk_punctuation, restore_cjk_punctuation};
+use crate::ui::markdown::table::TableBuilder;
 use crate::ui::theme;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::buffer::Buffer;
@@ -13,8 +15,11 @@ use url::{ParseError, Url};
 const LINK_PROBE_BACKGROUND: Color = Color::Rgb(1, 2, 3);
 const LINK_PROBE_STYLE: Style = Style::new().bg(LINK_PROBE_BACKGROUND);
 
-pub fn render_markdown(input: &str) -> Vec<Line<'static>> {
-    render_markdown_document(input, None, None).lines
+mod cjk;
+mod table;
+
+pub fn render_markdown(input: &str, viewport_width: u16) -> Vec<Line<'static>> {
+    render_markdown_document(input, None, None, viewport_width).lines
 }
 
 pub struct MarkdownDocument {
@@ -26,12 +31,14 @@ pub fn render_markdown_document(
     input: &str,
     base_url: Option<&str>,
     selected_link: Option<usize>,
+    viewport_width: u16,
 ) -> MarkdownDocument {
     render_markdown_document_with_style(
         input,
         base_url,
         selected_link,
         theme::ARTICLE_LINK_SELECTED,
+        viewport_width,
     )
 }
 
@@ -40,9 +47,11 @@ fn render_markdown_document_with_style(
     base_url: Option<&str>,
     selected_link: Option<usize>,
     selected_link_style: Style,
+    viewport_width: u16,
 ) -> MarkdownDocument {
-    let opts = Options::ENABLE_STRIKETHROUGH;
-    let parser = Parser::new_ext(input, opts);
+    let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES;
+    let (source, escaped) = escape_cjk_punctuation(input);
+    let parser = Parser::new_ext(&source, opts);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
@@ -54,6 +63,7 @@ fn render_markdown_document_with_style(
     let mut need_paragraph_break = false;
     let mut links = Vec::new();
     let mut active_link = None;
+    let mut table: Option<TableBuilder> = None;
 
     let base_style = Style::default().fg(theme::TEXT);
 
@@ -123,6 +133,24 @@ fn render_markdown_document_with_style(
                     };
                     prefix_spans = vec![Span::styled(marker, theme::LIST_MARKER)];
                 }
+                Tag::Table(alignments) => {
+                    flush_line(&mut lines, &mut current_spans, &prefix_spans);
+                    if need_paragraph_break {
+                        lines.push(Line::from(""));
+                        need_paragraph_break = false;
+                    }
+                    table = Some(TableBuilder::new(alignments));
+                }
+                Tag::TableHead => {
+                    if let Some(table) = &mut table {
+                        table.begin_row(true);
+                    }
+                }
+                Tag::TableRow => {
+                    if let Some(table) = &mut table {
+                        table.begin_row(false);
+                    }
+                }
                 Tag::BlockQuote(_) => {
                     flush_line(&mut lines, &mut current_spans, &prefix_spans);
                     prefix_spans = vec![Span::styled(
@@ -132,6 +160,7 @@ fn render_markdown_document_with_style(
                 }
                 Tag::Link { dest_url, .. } => {
                     let top = current_style(&style_stack, base_style);
+                    let dest_url = restore_cjk_punctuation(&dest_url, escaped);
                     let link_index = resolve_article_link(&dest_url, base_url).map(|url| {
                         let index = links.len();
                         links.push(url);
@@ -175,6 +204,28 @@ fn render_markdown_document_with_style(
                     flush_line(&mut lines, &mut current_spans, &prefix_spans);
                     prefix_spans.clear();
                 }
+                TagEnd::TableCell => {
+                    if let Some(table) = &mut table {
+                        table.push_cell(std::mem::take(&mut current_spans));
+                    }
+                }
+                TagEnd::TableHead | TagEnd::TableRow => {
+                    if let Some(table) = &mut table {
+                        table.end_row();
+                    }
+                }
+                TagEnd::Table => {
+                    if let Some(table) = table.take() {
+                        // Table lines bypass flush_line, so the quote marker
+                        // or list bullet has to be carried over by hand.
+                        let width = viewport_width.saturating_sub(prefix_width(&prefix_spans));
+                        for mut line in table.render(width) {
+                            line.spans = prefix_spans.iter().cloned().chain(line.spans).collect();
+                            lines.push(line);
+                        }
+                    }
+                    need_paragraph_break = true;
+                }
                 TagEnd::BlockQuote(_) => {
                     flush_line(&mut lines, &mut current_spans, &prefix_spans);
                     prefix_spans.clear();
@@ -187,6 +238,7 @@ fn render_markdown_document_with_style(
                 _ => {}
             },
             Event::Text(text) => {
+                let text = restore_cjk_punctuation(&text, escaped);
                 if in_code_block {
                     for line_str in text.lines() {
                         if !current_spans.is_empty() {
@@ -213,6 +265,7 @@ fn render_markdown_document_with_style(
                 } else {
                     theme::CODE
                 };
+                let code = restore_cjk_punctuation(&code, escaped);
                 current_spans.push(Span::styled(format!("`{code}`"), style));
             }
             Event::SoftBreak => {
@@ -263,8 +316,13 @@ pub fn link_row_range(
     if width == 0 {
         return None;
     }
-    let document =
-        render_markdown_document_with_style(input, base_url, Some(link_index), LINK_PROBE_STYLE);
+    let document = render_markdown_document_with_style(
+        input,
+        base_url,
+        Some(link_index),
+        LINK_PROBE_STYLE,
+        width,
+    );
     document.links.get(link_index)?;
     let paragraph = Paragraph::new(document.lines).wrap(Wrap { trim: false });
     let height = u16::try_from(paragraph.line_count(width))
@@ -301,6 +359,15 @@ fn current_style(stack: &[Style], base: Style) -> Style {
     stack.last().copied().unwrap_or(base)
 }
 
+/// How much of the line a quote marker or list bullet has already claimed.
+fn prefix_width(prefix_spans: &[Span<'static>]) -> u16 {
+    let width: usize = prefix_spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum();
+    u16::try_from(width).unwrap_or(u16::MAX)
+}
+
 fn flush_line(
     lines: &mut Vec<Line<'static>>,
     current_spans: &mut Vec<Span<'static>>,
@@ -315,54 +382,4 @@ fn flush_line(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn line_texts(input: &str) -> Vec<String> {
-        render_markdown(input)
-            .into_iter()
-            .map(|line| {
-                line.spans
-                    .into_iter()
-                    .map(|span| span.content.into_owned())
-                    .collect::<String>()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn renders_heading_and_paragraph_spacing() {
-        let lines = line_texts("# Title\n\nBody **strong** and *em*");
-
-        assert_eq!(lines, vec!["Title", "", "Body strong and em"]);
-    }
-
-    #[test]
-    fn renders_nested_unordered_and_ordered_lists() {
-        let lines = line_texts("- parent\n  - child\n\n3. third\n4. fourth");
-
-        assert_eq!(
-            lines,
-            vec!["- parent", "  - child", "", "3. third", "4. fourth"]
-        );
-    }
-
-    #[test]
-    fn renders_block_quotes_and_code_blocks() {
-        let lines = line_texts("> quoted\n\n```\nlet x = 1;\n```");
-
-        assert_eq!(lines, vec!["> quoted", "", "  let x = 1;"]);
-    }
-
-    #[test]
-    fn renders_links_as_underlined_text_without_url_suffix() {
-        let lines = render_markdown("[site](https://example.com)");
-
-        assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].spans[0].content, "site");
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::UNDERLINED));
-    }
-}
+mod tests;
