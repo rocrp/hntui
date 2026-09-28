@@ -72,6 +72,7 @@ fn input() -> SummaryInput {
             time: 1,
             comment_count: 1,
             kids: vec![2],
+            kind: crate::api::types::StoryKind::Story,
         },
         article: None,
         comments: vec![Comment {

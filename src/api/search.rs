@@ -1,4 +1,4 @@
-use crate::api::types::Story;
+use crate::api::types::{Story, StoryKind};
 use crate::logging;
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
@@ -45,6 +45,8 @@ impl AlgoliaHit {
             time: self.created_at_i.unwrap_or(0),
             comment_count: self.num_comments.unwrap_or(0),
             kids: vec![],
+            // The query is filtered to `tags=story`.
+            kind: StoryKind::Story,
         }))
     }
 }

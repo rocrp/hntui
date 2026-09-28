@@ -14,7 +14,7 @@ pub enum ApiBackend {
 }
 
 /// Which feed to display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ValueEnum)]
 pub enum FeedKind {
     #[default]
     Top,
@@ -104,6 +104,10 @@ pub struct WebStory {
     pub user: Option<String>,
     pub time: i64,
     pub comments_count: i64,
+    /// `link`, `ask`, `show`, `job`, `poll` — or `comment` when `/item/:id`
+    /// was asked about a comment.
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
 }
 
 impl From<WebStory> for Story {
@@ -124,6 +128,11 @@ impl From<WebStory> for Story {
             time: ws.time,
             comment_count: ws.comments_count,
             kids: vec![],
+            kind: match ws.kind.as_deref() {
+                Some("job") => StoryKind::Job,
+                Some("poll") => StoryKind::Poll,
+                _ => StoryKind::Story,
+            },
         }
     }
 }
@@ -135,6 +144,39 @@ pub struct WebItem {
     pub content: Option<String>,
     #[serde(default)]
     pub comments: Vec<WebComment>,
+}
+
+impl WebItem {
+    pub fn into_thread(self) -> StoryThread {
+        StoryThread {
+            text: self.content.filter(|text| !text.trim().is_empty()),
+            comments: self
+                .comments
+                .into_iter()
+                .filter_map(|c| c.into_comment_node(0))
+                .collect(),
+        }
+    }
+}
+
+/// `/item/:id` looked up by id: the story's own fields with its discussion,
+/// or hackerweb's `{"error": …}` for an unknown id.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum WebItemLookup {
+    Missing {
+        #[allow(dead_code)]
+        error: String,
+    },
+    Found(WebStoryItem),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebStoryItem {
+    #[serde(flatten)]
+    pub story: WebStory,
+    #[serde(flatten)]
+    pub item: WebItem,
 }
 
 /// A single comment inside a `WebItem` response.
@@ -221,6 +263,39 @@ pub struct HnItem {
     pub deleted: Option<bool>,
 }
 
+/// What kind of HN item a Story is, normalized across backends to the
+/// official API's vocabulary (hackerweb's `link`/`ask`/`show` are all stories).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StoryKind {
+    #[default]
+    Story,
+    Job,
+    Poll,
+}
+
+/// Why a Source could not produce the Story asked for by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryLookupError {
+    /// The backend has no item with this id.
+    Missing { id: u64 },
+    /// The item exists but is a comment (or another non-story kind).
+    NotAStory { id: u64, kind: String },
+}
+
+impl std::fmt::Display for StoryLookupError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing { id } => write!(formatter, "item {id} not found"),
+            Self::NotAStory { id, kind } => {
+                write!(formatter, "item {id} is a {kind}, not a story")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StoryLookupError {}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Story {
     pub id: u64,
@@ -235,6 +310,9 @@ pub struct Story {
     pub time: i64,
     pub comment_count: i64,
     pub kids: Vec<u64>,
+    /// Optional in persisted state: older `state.json` files predate it.
+    #[serde(default)]
+    pub kind: StoryKind,
 }
 
 impl Story {
@@ -269,13 +347,18 @@ impl TryFrom<HnItem> for Story {
     type Error = anyhow::Error;
 
     fn try_from(item: HnItem) -> Result<Self> {
-        let kind = item.kind.unwrap_or(HnItemKind::Unknown);
-        if !matches!(kind, HnItemKind::Story | HnItemKind::Job | HnItemKind::Poll) {
-            return Err(anyhow!(
-                "expected HN item type in [story, job, poll], got type={kind:?} id={}",
-                item.id
-            ));
-        }
+        let kind = match item.kind.unwrap_or(HnItemKind::Unknown) {
+            HnItemKind::Story => StoryKind::Story,
+            HnItemKind::Job => StoryKind::Job,
+            HnItemKind::Poll => StoryKind::Poll,
+            other => {
+                return Err(StoryLookupError::NotAStory {
+                    id: item.id,
+                    kind: format!("{other:?}").to_lowercase(),
+                }
+                .into())
+            }
+        };
 
         Ok(Self {
             id: item.id,
@@ -295,6 +378,7 @@ impl TryFrom<HnItem> for Story {
                 .ok_or_else(|| anyhow!("item missing time id={}", item.id))?,
             comment_count: item.descendants.unwrap_or(0),
             kids: item.kids.unwrap_or_default(),
+            kind,
         })
     }
 }
@@ -341,112 +425,4 @@ pub struct CommentNode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ask_hn_item() -> HnItem {
-        HnItem {
-            id: 7,
-            kind: Some(HnItemKind::Story),
-            by: Some("alice".to_string()),
-            time: Some(1),
-            title: Some("Ask HN: anything?".to_string()),
-            url: None,
-            text: Some("<p>the body".to_string()),
-            score: Some(1),
-            descendants: Some(0),
-            kids: None,
-            dead: None,
-            deleted: None,
-        }
-    }
-
-    #[test]
-    fn self_post_body_survives_the_item_to_story_conversion() {
-        let story = Story::try_from(ask_hn_item()).expect("ask hn item is a story");
-
-        assert_eq!(story.text.as_deref(), Some("<p>the body"));
-        assert_eq!(story.url, None);
-    }
-
-    #[test]
-    fn hackerweb_item_carries_the_self_post_body_with_the_discussion() {
-        let payload = r#"{"content":"<p>the body","comments":[]}"#;
-        let item: WebItem = serde_json::from_str(payload).expect("decode hackerweb item");
-
-        let thread = StoryThread {
-            text: item.content.filter(|text| !text.trim().is_empty()),
-            comments: Vec::new(),
-        };
-
-        assert_eq!(thread.text.as_deref(), Some("<p>the body"));
-    }
-
-    #[test]
-    fn hackerweb_internal_discussion_url_is_not_an_article_link() {
-        let payload = r#"{
-            "id": 7,
-            "title": "Ask HN: anything?",
-            "url": "item?id=7",
-            "points": 1,
-            "user": "alice",
-            "time": 1,
-            "comments_count": 0,
-            "type": "ask"
-        }"#;
-        let listed: WebStory = serde_json::from_str(payload).expect("decode hackerweb listing");
-
-        let story = Story::from(listed);
-
-        assert_eq!(story.url, None);
-    }
-
-    #[test]
-    fn hackerweb_external_article_url_survives_the_listing_conversion() {
-        let payload = r#"{
-            "id": 7,
-            "title": "A linked article",
-            "url": "https://example.com/article",
-            "points": 1,
-            "user": "alice",
-            "time": 1,
-            "comments_count": 0,
-            "type": "link"
-        }"#;
-        let listed: WebStory = serde_json::from_str(payload).expect("decode hackerweb listing");
-
-        let story = Story::from(listed);
-
-        assert_eq!(story.url.as_deref(), Some("https://example.com/article"));
-    }
-
-    #[test]
-    fn a_link_submission_has_no_body_in_either_shape() {
-        let mut item = ask_hn_item();
-        item.text = None;
-        item.url = Some("https://example.com".to_string());
-        let story = Story::try_from(item).expect("link item is a story");
-
-        let payload = r#"{"comments":[]}"#;
-        let web_item: WebItem = serde_json::from_str(payload).expect("decode hackerweb item");
-
-        assert_eq!(story.text, None);
-        assert_eq!(web_item.content, None);
-    }
-
-    #[test]
-    fn absorb_text_fills_a_missing_body_but_never_overwrites_one() {
-        let mut listed = Story::try_from(ask_hn_item()).expect("story");
-        listed.text = None;
-        listed.absorb_text(Some("<p>from the thread".to_string()));
-        assert_eq!(listed.text.as_deref(), Some("<p>from the thread"));
-
-        listed.absorb_text(Some("<p>later, ignored".to_string()));
-        assert_eq!(listed.text.as_deref(), Some("<p>from the thread"));
-
-        let mut blank = Story::try_from(ask_hn_item()).expect("story");
-        blank.text = None;
-        blank.absorb_text(Some("   ".to_string()));
-        assert_eq!(blank.text, None);
-    }
-}
+mod tests;

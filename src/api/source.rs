@@ -20,6 +20,10 @@ pub trait StorySource: Send + Sync {
 
     fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<StoryThread>>;
 
+    /// One Story by id with its discussion. Fails with `StoryLookupError`
+    /// when the id is unknown or names a comment.
+    fn story_thread(&self, id: u64) -> BoxFuture<'static, Result<(Story, StoryThread)>>;
+
     fn comment_children(
         &self,
         ids: Vec<u64>,
@@ -71,6 +75,11 @@ impl StorySource for HnClient {
     fn comment_roots(&self, story: Story) -> BoxFuture<'static, Result<StoryThread>> {
         let source = self.clone();
         Box::pin(async move { source.fetch_comment_roots(&story).await })
+    }
+
+    fn story_thread(&self, id: u64) -> BoxFuture<'static, Result<(Story, StoryThread)>> {
+        let source = self.clone();
+        Box::pin(async move { source.fetch_story_thread(id).await })
     }
 
     fn comment_children(
@@ -179,6 +188,17 @@ impl StorySource for InMemorySource {
         let comments = self.comments.get(&story.id).cloned().unwrap_or_default();
         let text = self.thread_texts.get(&story.id).cloned();
         Box::pin(async move { Ok(StoryThread { text, comments }) })
+    }
+
+    fn story_thread(&self, id: u64) -> BoxFuture<'static, Result<(Story, StoryThread)>> {
+        let story = self.stories.iter().find(|story| story.id == id).cloned();
+        let thread = story.clone().map(|story| self.comment_roots(story));
+        Box::pin(async move {
+            match (story, thread) {
+                (Some(story), Some(thread)) => Ok((story, thread.await?)),
+                _ => Err(super::StoryLookupError::Missing { id }.into()),
+            }
+        })
     }
 
     fn comment_children(

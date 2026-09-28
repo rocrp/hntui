@@ -21,6 +21,33 @@ brew install rocrp/tap/hntui
 curl -fsSL https://raw.githubusercontent.com/rocrp/hntui/main/scripts/install.sh | bash
 ```
 
+## Headless CLI (agents, scripts)
+
+Subcommands print one JSON document to stdout; bare `hntui` still opens the TUI
+(outside a terminal it prints help to stderr and exits 2).
+
+```bash
+hntui stories [--feed top|new|best|ask|show|jobs] [-n/--limit 30] [--since 24h]
+hntui thread <id> [-n/--max-comments 200] [--no-article]
+```
+
+- `stories` → `{feed, stories:[{id, title, url, hn_url, by, score, comments, time, type}]}`.
+  `time` is RFC 3339 UTC; `type` is `story|job|poll`. `--since` takes unix
+  seconds, RFC 3339, `YYYY-MM-DD` (UTC) or `30m`/`24h`/`7d`, and filters the
+  `--limit` stories taken from the top of the feed.
+- `thread` → `{story:{…}, body, article:{title, url, content}|null, article_error,
+  comments:[{id, by, time, text, replies:[…]}], comments_included, text}`.
+  `--max-comments` keeps the first N comments in reading order (`0` = all).
+  The Article comes from localwebrs, as `v` does; a failed fetch sets
+  `article_error` instead of vanishing. `text` is exactly the prompt `s` sends
+  the summarizer: title, Article (truncated at `max_article_chars`), indented
+  `author: text` comments.
+- Failure: empty stdout, `{"error":{"kind","message","retryable"}}` on stderr.
+  Exit codes: 1 `service`/`not_found`/`local`, 2 `usage`, 4 `network`.
+
+Global flags (`--api-backend`, `--config`, `--no-file-cache`, …) go before the
+subcommand: `hntui --api-backend firebase thread 8863`.
+
 ## Keys
 
 **Stories**

@@ -18,6 +18,7 @@ fn story() -> Story {
         time: 1_700_000_000,
         comment_count: 7,
         kids: vec![],
+        kind: crate::api::types::StoryKind::Story,
     }
 }
 

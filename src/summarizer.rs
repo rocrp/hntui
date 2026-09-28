@@ -13,7 +13,7 @@ mod friendly_error;
 pub(crate) mod material;
 pub(crate) use connection::{ConnectionDraft, ConnectionTestError, ConnectionTestSuccess};
 pub(crate) use friendly_error::friendly_llm_error;
-pub(crate) use material::{comments_as_thread, truncated_article};
+pub(crate) use material::{build_prompt, comments_as_thread, truncated_article};
 
 pub(crate) type LlmResult<T> = std::result::Result<T, smolllm::Error>;
 pub(crate) type LlmFuture = BoxFuture<'static, LlmResult<LlmSession>>;
@@ -300,34 +300,6 @@ impl LlmStream for SmolLlmStream {
             })
         })
     }
-}
-
-fn build_prompt(
-    story: &Story,
-    comments: &[Comment],
-    article: Option<&str>,
-    max_comments: usize,
-    max_article_chars: usize,
-) -> String {
-    let mut prompt = format!("# {}\n\n", story.title);
-
-    if let Some(article) = article {
-        prompt.push_str("## Article\n\n");
-        prompt.push_str(&truncated_article(article, max_article_chars));
-        prompt.push_str("\n\n");
-    }
-
-    if comments.is_empty() {
-        return prompt;
-    }
-
-    // Only label the comments once there is another section to tell them from;
-    // an article-less prompt stays byte-identical to the pre-Article shape.
-    if article.is_some() {
-        prompt.push_str("## Comments\n\n");
-    }
-    prompt.push_str(&comments_as_thread(comments, max_comments));
-    prompt
 }
 
 #[cfg(test)]

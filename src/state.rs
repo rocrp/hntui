@@ -176,6 +176,7 @@ mod tests {
             time: 1,
             comment_count: 0,
             kids: vec![],
+            kind: crate::api::types::StoryKind::Story,
         };
 
         store

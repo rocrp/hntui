@@ -89,6 +89,7 @@ fn story(id: u64) -> Story {
         time: 1,
         comment_count: 1,
         kids: Vec::new(),
+        kind: crate::api::types::StoryKind::Story,
     }
 }
 
@@ -236,4 +237,60 @@ async fn hackerweb_request_failure_does_not_expose_the_base_url() {
         "{message}"
     );
     assert!(!message.contains(secret), "{message}");
+}
+
+#[test]
+fn hackerweb_paging_continues_with_the_page_after_those_loaded() {
+    use super::client::hackerweb_next_page;
+    assert_eq!(hackerweb_next_page(30), 2);
+    assert_eq!(hackerweb_next_page(60), 3);
+}
+
+#[tokio::test]
+async fn hackerweb_story_thread_carries_the_story_fields_and_discussion() {
+    let body = br#"{"id":7,"title":"Ask HN: x?","points":5,"user":"alice","time":9,
+        "comments_count":1,"type":"ask","url":"item?id=7","content":"<p>body",
+        "comments":[{"id":8,"user":"bob","time":10,"content":"hi","comments":[]}]}"#;
+    let (base_url, server) = serve_chunked_once(body.to_vec());
+
+    let (story, thread) = hackerweb_client(base_url)
+        .fetch_story_thread(7)
+        .await
+        .expect("story thread decodes");
+
+    server.join().expect("server thread");
+    assert_eq!((story.id, story.score, story.by.as_str()), (7, 5, "alice"));
+    assert_eq!(story.url, None);
+    assert_eq!(thread.text.as_deref(), Some("<p>body"));
+    assert_eq!(thread.comments[0].comment.id, 8);
+}
+
+#[tokio::test]
+async fn hackerweb_story_thread_reports_missing_ids_and_comments() {
+    use super::StoryLookupError;
+    let cases: [(&[u8], StoryLookupError); 2] = [
+        (
+            br#"{"error":"Item 7 not found"}"#,
+            StoryLookupError::Missing { id: 7 },
+        ),
+        (
+            br#"{"id":7,"title":"","user":"bob","time":9,"type":"comment",
+                "url":"item?id=7","comments_count":0,"content":"hi","comments":[]}"#,
+            StoryLookupError::NotAStory {
+                id: 7,
+                kind: "comment".to_string(),
+            },
+        ),
+    ];
+    for (body, expected) in cases {
+        let (base_url, server) = serve_chunked_once(body.to_vec());
+
+        let error = hackerweb_client(base_url)
+            .fetch_story_thread(7)
+            .await
+            .expect_err("not a story");
+
+        server.join().expect("server thread");
+        assert_eq!(error.downcast_ref::<StoryLookupError>(), Some(&expected));
+    }
 }

@@ -1,7 +1,8 @@
 use crate::api::file_cache::{CacheHit, FileCache};
 use crate::api::hackerweb_response::decode_json as decode_hackerweb_json;
 use crate::api::types::{
-    ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, StoryThread, WebItem, WebStory,
+    ApiBackend, Comment, CommentNode, FeedKind, HnItem, Story, StoryLookupError, StoryThread,
+    WebItem, WebItemLookup, WebStory,
 };
 use crate::logging;
 use anyhow::{anyhow, Context, Result};
@@ -148,8 +149,8 @@ impl HnClient {
     ) -> Result<Vec<Story>> {
         match self.backend {
             ApiBackend::HackerWeb => {
-                let page = (loaded_count / 30) + 2; // page 1 already loaded, so next is 2, etc.
-                self.fetch_hackerweb_feed(feed, page).await
+                self.fetch_hackerweb_feed(feed, hackerweb_next_page(loaded_count))
+                    .await
             }
             ApiBackend::Firebase => {
                 if loaded_count >= story_ids.len() {
@@ -186,6 +187,21 @@ impl HnClient {
                     .fetch_comment_nodes_prefetch(&kids, 0, COMMENT_PREFETCH_EXTRA_DEPTH)
                     .await?;
                 Ok(StoryThread::from_comments(comments))
+            }
+        }
+    }
+
+    /// Fetch one Story by id together with its discussion.
+    ///
+    /// - **HackerWeb**: the same single `/item/:id` request as `fetch_comment_roots`.
+    /// - **Firebase**: the item, then its comment roots.
+    pub async fn fetch_story_thread(&self, id: u64) -> Result<(Story, StoryThread)> {
+        match self.backend {
+            ApiBackend::HackerWeb => self.fetch_hackerweb_story_thread(id).await,
+            ApiBackend::Firebase => {
+                let story = Story::try_from(self.fetch_item(id).await?)?;
+                let thread = self.fetch_comment_roots(&story).await?;
+                Ok((story, thread))
             }
         }
     }
@@ -234,6 +250,33 @@ impl HnClient {
     }
 
     async fn fetch_hackerweb_thread(&self, story_id: u64) -> Result<StoryThread> {
+        let item: WebItem = self.fetch_hackerweb_item(story_id).await?;
+        Ok(item.into_thread())
+    }
+
+    /// `/item/:id` carries the story's own fields beside its body and comments.
+    /// A missing id is answered `200 {"error": …}`, never a 404.
+    async fn fetch_hackerweb_story_thread(&self, story_id: u64) -> Result<(Story, StoryThread)> {
+        let found = match self.fetch_hackerweb_item(story_id).await? {
+            WebItemLookup::Missing { .. } => {
+                return Err(StoryLookupError::Missing { id: story_id }.into())
+            }
+            WebItemLookup::Found(found) => found,
+        };
+        if let Some(kind @ "comment") = found.story.kind.as_deref() {
+            return Err(StoryLookupError::NotAStory {
+                id: story_id,
+                kind: kind.to_string(),
+            }
+            .into());
+        }
+        Ok((Story::from(found.story), found.item.into_thread()))
+    }
+
+    async fn fetch_hackerweb_item<T: serde::de::DeserializeOwned>(
+        &self,
+        story_id: u64,
+    ) -> Result<T> {
         let url = format!("{}/item/{story_id}", self.base_url);
         logging::log_info(format!("hackerweb: fetching item id={story_id}"));
         let response = self
@@ -246,15 +289,7 @@ impl HnClient {
             .error_for_status()
             .map_err(reqwest::Error::without_url)
             .with_context(|| format!("HackerWeb returned an error for item id={story_id}"))?;
-        let web_item: WebItem = decode_hackerweb_json(response, format!("item {story_id}")).await?;
-        Ok(StoryThread {
-            text: web_item.content.filter(|text| !text.trim().is_empty()),
-            comments: web_item
-                .comments
-                .into_iter()
-                .filter_map(|c| c.into_comment_node(0))
-                .collect(),
-        })
+        decode_hackerweb_json(response, format!("item {story_id}")).await
     }
 
     // ── Firebase-only methods (kept for Firebase backend) ──
@@ -412,7 +447,7 @@ impl HnClient {
             .json::<Option<HnItem>>()
             .await
             .with_context(|| format!("decode item id={id}"))?
-            .ok_or_else(|| anyhow!("item missing (null) id={id}"))?;
+            .ok_or(StoryLookupError::Missing { id })?;
 
         let mut cache = self.cache.lock().await;
         cache.put(id, item.clone());
@@ -437,4 +472,9 @@ impl HnClient {
             }
         });
     }
+}
+
+/// HackerWeb pages are 30 stories, 1-based (`page=0` repeats page 1).
+pub(super) fn hackerweb_next_page(loaded_count: usize) -> usize {
+    loaded_count / 30 + 1
 }

@@ -29,6 +29,7 @@ pub(super) fn story() -> Story {
         time: 1_700_000_000,
         comment_count: 2,
         kids: vec![1, 2],
+        kind: crate::api::types::StoryKind::Story,
     }
 }
 

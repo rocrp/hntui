@@ -318,6 +318,7 @@ mod tests {
             time: 1,
             comment_count: comments,
             kids: vec![id + 100],
+            kind: crate::api::types::StoryKind::Story,
         }
     }
 

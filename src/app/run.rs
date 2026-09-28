@@ -1,6 +1,5 @@
 use super::{App, AppEvent, TaskTarget, View};
-use crate::api::{DiskCacheConfig, FeedKind, HnClient, SearchClient, Sources};
-use crate::article::ArticleFetcher;
+use crate::api::{FeedKind, SearchClient, Sources};
 use crate::config::Config;
 use crate::state::StateStore;
 use crate::summarizer::Summarizer;
@@ -14,48 +13,23 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-fn prepare_article_cache_dir(dir: &std::path::Path) -> Result<std::path::PathBuf> {
-    std::fs::create_dir_all(dir)
-        .with_context(|| format!("create article cache dir {}", dir.display()))?;
-    Ok(dir.to_path_buf())
-}
-
 /// Ceiling on how many queued events one frame absorbs, so draining a backlog
 /// cannot starve keyboard input.
 const MAX_EVENTS_PER_FRAME: usize = 256;
 
 pub async fn run(cli: Cli, config: Config) -> Result<()> {
-    let resolved_cache_dir = match cli.file_cache_dir.clone() {
-        Some(dir) => dir,
-        None => {
-            let proj = directories::ProjectDirs::from("dev", "hntui", "hntui")
-                .context("resolve OS cache dir")?;
-            proj.cache_dir().to_path_buf()
-        }
+    // `--no-file-cache` governs the HN item cache and story list state only.
+    let state_store = if cli.no_file_cache {
+        None
+    } else {
+        Some(StateStore::new(cli.cache_dir()?))
     };
-    // `--no-file-cache` governs the HN item cache only.
-    let cache_dir = (!cli.no_file_cache).then(|| resolved_cache_dir.clone());
-    let state_store = cache_dir.clone().map(StateStore::new);
-    let disk_cache = cache_dir.clone().map(|dir| DiskCacheConfig {
-        dir,
-        ttl: Duration::from_secs(cli.file_cache_ttl_secs.get()),
-    });
-
-    let backend = cli.api_backend;
-    let base_url = cli.resolved_base_url();
     let http = reqwest::Client::builder()
         .pool_max_idle_per_host(10)
         .pool_idle_timeout(Duration::from_secs(30))
         .build()
         .context("build shared HTTP client")?;
-    let client = HnClient::new(
-        http.clone(),
-        base_url,
-        backend,
-        cli.cache_size.get(),
-        cli.concurrency.get(),
-        disk_cache,
-    )?;
+    let client = cli.hn_client(http.clone())?;
     client.cleanup_disk_cache_background(Duration::from_secs(60 * 60 * 24));
     let search = SearchClient::new(http.clone(), "https://hn.algolia.com/api/v1/search")?;
     let summarizer = Summarizer::new(
@@ -63,13 +37,7 @@ pub async fn run(cli: Cli, config: Config) -> Result<()> {
         config.api_key_override(),
         http.clone(),
     );
-    // localwebrs writes a CWD-relative `cache/cache.sqlite`, so it must run
-    // from our cache dir or it litters the user's working directory. The dir
-    // has to exist up front: a missing `current_dir` fails the spawn with the
-    // same ENOENT a missing binary would, which would misreport as "install
-    // localwebrs". Independent of --no-file-cache, which is about HN items.
-    let article_dir = prepare_article_cache_dir(&resolved_cache_dir)?;
-    let article_fetcher = ArticleFetcher::new(config.article_bin(), Some(article_dir));
+    let article_fetcher = cli.article_fetcher(&config)?;
     let sources = Sources::new(Arc::new(client), Arc::new(search));
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
@@ -206,24 +174,4 @@ fn hand_terminal_to_editor(
     tui.resume().context("take the terminal back")?;
     app.finish_config_edit(outcome);
     Ok(EventStream::new())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_uncreatable_article_cache_directory_is_fatal() {
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let file = temp.path().join("not-a-directory");
-        std::fs::write(&file, "occupied").expect("create blocking file");
-
-        let error = prepare_article_cache_dir(&file.join("cache"))
-            .expect_err("a file cannot contain the article cache");
-
-        assert!(
-            error.to_string().contains("create article cache dir"),
-            "unexpected error: {error:#}"
-        );
-    }
 }

@@ -18,7 +18,7 @@ One of the HN listings a user can browse (top, new, ask, show, …).
 _Avoid_: list, tab
 
 **Source**:
-Where the app obtains stories, comments, or search results. Adapters at this seam: the HN client, Algolia search, and an in-memory fixture for tests.
+Where the app obtains stories, comments, or search results — and, for the `thread` Subcommand, one Story by id with its StoryThread. Adapters at this seam: the HN client, Algolia search, and an in-memory fixture for tests.
 _Avoid_: client (when meaning the seam), backend (reserved for the HN API flavor)
 
 **StoryThread**:
@@ -70,6 +70,10 @@ _Avoid_: restart, refresh
 Packaging what hntui has already shown for one Story — its links and metadata, its Summary, its Article, its Comments — so another agent can continue where the user left off. A Handoff never fetches; it carries only what is loaded.
 _Avoid_: export, share, copy (a Copy puts one view's content on the clipboard; a Handoff carries the whole Story context)
 
+**Subcommand**:
+A headless invocation (`hntui stories`, `hntui thread <id>`) that prints one JSON document for an agent or script instead of opening the TUI. Failures print `{"error":{kind,message,retryable}}` to stderr, the same contract as rcrs's CLIs.
+_Avoid_: headless mode, API mode
+
 **Paste**:
 The hosted copy of a Handoff on the paste service, addressed by its raw URL; private and short-lived.
 _Avoid_: upload, share link, gist
@@ -80,7 +84,7 @@ _Avoid_: upload, share link, gist
 The module that owns comment line geometry — which lines exist, which comment a line belongs to, and what is visible. The heights-match-lines invariant lives here and nowhere else.
 
 **Summarizer**:
-The core that turns a story plus its comments into a stream of summary events via an LLM.
+The core that turns a story plus its comments into a stream of summary events via an LLM. Its prompt (`summarizer/material.rs`) is also the `text` of `hntui thread`.
 _Avoid_: plugin (there is no plugin system; one adapter does not make a seam)
 
 **Summary**:

@@ -19,6 +19,7 @@ pub(super) fn story(id: u64) -> Story {
         time: 1,
         comment_count: 0,
         kids: vec![],
+        kind: crate::api::types::StoryKind::Story,
     }
 }
 
@@ -53,6 +54,7 @@ pub(super) fn cli() -> Cli {
         base_url: None,
         config: None,
         env_file: None,
+        command: None,
     }
 }
 

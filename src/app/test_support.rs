@@ -100,6 +100,10 @@ impl StorySource for ControlledStorySource {
         })
     }
 
+    fn story_thread(&self, _id: u64) -> BoxFuture<'static, anyhow::Result<(Story, StoryThread)>> {
+        unimplemented!("the app never looks a story up by id")
+    }
+
     fn comment_children(
         &self,
         _ids: Vec<u64>,
