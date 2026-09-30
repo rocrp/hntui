@@ -389,6 +389,7 @@ async fn an_article_read_with_v_is_carried_even_when_the_summarizer_would_skip_i
             api_key: None,
             base_url: None,
             max_comments: 200,
+            timeout_secs: crate::config::default_summary_timeout_secs(),
             include_article: false,
             max_article_chars: 20_000,
             system_prompt: "Summarize".to_string(),

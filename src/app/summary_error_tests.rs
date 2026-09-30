@@ -66,6 +66,7 @@ fn app_with_http_failure(
         api_key: None,
         base_url: None,
         max_comments: 20,
+        timeout_secs: crate::config::default_summary_timeout_secs(),
         include_article: false,
         max_article_chars: 20_000,
         system_prompt: "Summarize".to_string(),

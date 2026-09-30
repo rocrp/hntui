@@ -4,6 +4,9 @@ use crate::config::SummarizeConfig;
 use futures::{stream, FutureExt};
 use std::sync::Arc;
 
+#[path = "timeout_tests.rs"]
+mod timeout_tests;
+
 #[derive(Clone)]
 struct FakeLlmStream;
 
@@ -95,6 +98,7 @@ fn config() -> SummarizeConfig {
         api_key: None,
         base_url: None,
         max_comments: 20,
+        timeout_secs: crate::config::default_summary_timeout_secs(),
         include_article: true,
         max_article_chars: 20_000,
         system_prompt: "Summarize".to_string(),

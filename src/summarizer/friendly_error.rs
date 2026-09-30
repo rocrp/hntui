@@ -8,7 +8,7 @@ pub(crate) fn friendly_llm_error(
     request_timeout: Option<Duration>,
 ) -> String {
     match error {
-        smolllm::Error::Request(error) if error.is_timeout() => request_timeout.map_or_else(
+        _ if error.is_timeout() => request_timeout.map_or_else(
             || "request timed out".to_string(),
             |timeout| format!("timed out after {}s", timeout.as_secs()),
         ),

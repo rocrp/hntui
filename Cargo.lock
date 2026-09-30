@@ -1791,8 +1791,8 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smolllm"
-version = "0.7.1"
-source = "git+https://github.com/rocrp/smolllm-rs.git?tag=v0.7.1#fced6ccd97d9fa1a5ac2de28d0f7fc44a757bf3b"
+version = "0.8.0"
+source = "git+https://github.com/rocrp/smolllm-rs.git?tag=v0.8.0#b4e643bcc829b3601118e25c8e436daadc6ac58d"
 dependencies = [
  "base64",
  "bytes",

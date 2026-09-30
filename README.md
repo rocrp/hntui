@@ -187,7 +187,15 @@ Or set `api_key` in `config.toml`. Default uses Gemini (`gemini/gemini-flash-lit
 ```toml
 [summarize]
 model = "openai/gpt-4o-mini"
+timeout_secs = 600
 ```
+
+`timeout_secs` defaults to 600 (10 minutes) and must be greater than zero.
+It limits each HTTP attempt, including the entire streamed response;
+retries and fallback models can extend the overall wait. Increase it for
+long discussions or slower reasoning models. A timeout reports the configured
+limit, e.g. `timed out after 600s`. Upstream servers may enforce their own
+shorter deadlines. The connection test keeps its 15-second limit.
 
 The `model` field uses smolllm's `provider/model_name` format. Comma-separate
 for fallback (`"openai/gpt-4o, gemini/gemini-flash-lite-latest"`). See

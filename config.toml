@@ -12,6 +12,10 @@ model = "gemini/gemini-flash-lite-latest"
 
 max_comments = 200
 
+# Total HTTP request timeout in seconds, including the streamed response.
+# Applied per attempt; retries/fallbacks can take longer. Must be greater than 0.
+timeout_secs = 600
+
 # Feed the linked article (or an Ask HN body) to the model alongside the
 # discussion. Requires localwebrs; when the fetch fails the summary still runs
 # on comments alone and says so.

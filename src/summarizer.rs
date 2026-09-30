@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use std::sync::Arc;
+use std::time::Duration;
 
 mod connection;
 #[cfg(test)]
@@ -86,6 +87,7 @@ pub(crate) struct SummaryRequest {
     user_prompt: String,
     api_key: Option<String>,
     base_url: Option<String>,
+    timeout: Duration,
 }
 
 #[cfg(test)]
@@ -188,6 +190,7 @@ impl Summarizer {
                 return;
             }
 
+            let timeout = Duration::from_secs(config.timeout_secs);
             let request = SummaryRequest {
                 model: config.model,
                 system_prompt: config.system_prompt,
@@ -200,11 +203,12 @@ impl Summarizer {
                 ),
                 api_key: api_key_override,
                 base_url: config.base_url,
+                timeout,
             };
             let mut session = match llm.start(request).await {
                 Ok(session) => session,
                 Err(error) => {
-                    yield Err(summary_llm_error(error));
+                    yield Err(summary_llm_error(error, timeout));
                     return;
                 }
             };
@@ -221,7 +225,7 @@ impl Summarizer {
                         reasoning: chunk.reasoning,
                     }),
                     Err(error) => {
-                        yield Err(summary_llm_error(error));
+                        yield Err(summary_llm_error(error, timeout));
                         return;
                     }
                 }
@@ -236,8 +240,8 @@ impl Summarizer {
     }
 }
 
-fn summary_llm_error(error: smolllm::Error) -> anyhow::Error {
-    anyhow::Error::msg(friendly_llm_error(&error, None))
+fn summary_llm_error(error: smolllm::Error, timeout: Duration) -> anyhow::Error {
+    anyhow::Error::msg(friendly_llm_error(&error, Some(timeout)))
 }
 
 #[derive(Clone)]
@@ -252,6 +256,7 @@ impl LlmStream for SmolLlmStream {
             let mut builder = smolllm::stream(request.user_prompt)
                 .model(&request.model)
                 .system_prompt(&request.system_prompt)
+                .timeout(request.timeout)
                 .http_client(http);
             if let Some(api_key) = request.api_key {
                 builder = builder.api_key(api_key);

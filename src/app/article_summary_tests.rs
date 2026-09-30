@@ -50,6 +50,7 @@ fn summarize_config(include_article: bool) -> SummarizeConfig {
         api_key: None,
         base_url: None,
         max_comments: 20,
+        timeout_secs: crate::config::default_summary_timeout_secs(),
         include_article,
         max_article_chars: 20_000,
         system_prompt: "Summarize".to_string(),

@@ -71,6 +71,7 @@ impl Summarizer {
                     user_prompt: "hi".to_string(),
                     api_key: draft.api_key,
                     base_url: draft.base_url,
+                    timeout,
                 };
                 let LlmSession {
                     model,
